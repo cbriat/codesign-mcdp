@@ -1,0 +1,39 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the package
+        run: pip install -e .
+
+      - name: Run smoke tests
+        run: python -m tests.test_smoke
+
+      - name: Run examples (sanity check)
+        run: |
+          python -m examples.01_drone
+          python -m examples.02_integer_optimization
+          python -m examples.03_auv_seabed
+          python -m examples.04_uncertain_and_ode
+          python -m examples.06_drone_mcdpl_syntax
+          python -m examples.07_drone_modular
+          python -m examples.08_vehicle_modular

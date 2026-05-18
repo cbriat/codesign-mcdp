@@ -1,0 +1,335 @@
+"""
+System: modular MCDP composition with named subsystems.
+
+Each subsystem (battery, actuator, sensor, ...) is its own ``DesignProblem``
+with its own functionality and resource posets. A ``System`` assembles
+several subsystems by
+
+    1. declaring outer functionalities (``provides``) and outer resources
+       (``requires``) that the system as a whole exposes;
+    2. adding subsystems by name (``add``);
+    3. attaching connection constraints (``constrain``) of the form
+
+           target_port >= demand_expression(ctx)
+
+       where ``target_port`` is either ``"module.f_port"`` (a subsystem's
+       required functionality) or an outer R name, and ``demand_expression``
+       is a plain Python function of a dict ``ctx`` holding the outer F
+       values plus every subsystem R port under its dotted name
+       (``"battery.mass"``, ``"actuator.power"``).
+
+The ``build()`` method emits a single ``DesignProblem`` whose Kleene
+iteration closes a feedback loop over the bundle of every subsystem R.
+The result composes like any other DP and can itself be used as a
+subsystem in a larger System.
+
+Notes
+-----
+* The loop axis is internal and named ``__modules__``. Users do not see it.
+* When a subsystem returns a multi-valued antichain (e.g. CatalogDP), the
+  System takes the Cartesian product across subsystems and lets the Min in
+  the outer antichain prune dominated combinations. This can blow up if
+  every subsystem is multi-valued; for engineering models it is rarely a
+  bottleneck.
+* Multiple ``constrain(target, ...)`` calls with the same target are
+  joined: the effective demand is the maximum (the join in Reals/Naturals).
+* Module F ports that have no constraint declared are an error. Outer R
+  ports without a constraint are also an error.
+"""
+from __future__ import annotations
+
+import itertools
+from typing import Any, Callable, Dict, List, Mapping, Optional
+
+from .antichains import Antichain
+from .composition import Loop
+from .dp import DesignProblem, FunctionDP
+from .posets import NamedProduct, Poset, Reals
+
+
+# Internal name for the loop axis bundling every subsystem's R. Users
+# should never need to type this directly.
+_MODULES_AXIS = "__modules__"
+
+
+class System:
+    """Modular MCDP composition with named subsystems.
+
+    Build with ``provides``/``requires``/``add``/``constrain`` and emit a
+    plain ``DesignProblem`` with ``build()``. The result is solved with
+    the ordinary ``solve`` function and can be nested inside another
+    System.
+    """
+
+    def __init__(self, name: str = "system"):
+        self.name = name
+        self._outer_F: Dict[str, Poset] = {}
+        self._outer_R: Dict[str, Poset] = {}
+        self._modules: Dict[str, DesignProblem] = {}
+        # constraint entries: (target_string, demand_callable)
+        self._constraints: List[tuple] = []
+
+    # ------------------------------------------------------------------ #
+    # Context manager sugar (optional)
+    # ------------------------------------------------------------------ #
+    def __enter__(self) -> "System":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Declarations
+    # ------------------------------------------------------------------ #
+    def provides(self, name: str, *, unit: str = "", poset: Poset = None) -> "System":
+        """Declare an outer functionality. Defaults to ``Reals(unit=unit)``."""
+        if name in self._outer_F:
+            raise ValueError(f"provides({name}) already declared")
+        self._outer_F[name] = poset if poset is not None else Reals(unit=unit)
+        return self
+
+    def requires(self, name: str, *, unit: str = "", poset: Poset = None) -> "System":
+        """Declare an outer resource. Defaults to ``Reals(unit=unit)``."""
+        if name in self._outer_R:
+            raise ValueError(f"requires({name}) already declared")
+        self._outer_R[name] = poset if poset is not None else Reals(unit=unit)
+        return self
+
+    def add(self, module_name: str, dp: DesignProblem) -> "System":
+        """Add a subsystem under a unique name."""
+        if module_name in self._modules:
+            raise ValueError(f"module name {module_name!r} already in use")
+        if "." in module_name:
+            raise ValueError("module name may not contain '.' (used for port refs)")
+        if module_name == _MODULES_AXIS:
+            raise ValueError(f"module name {_MODULES_AXIS!r} is reserved")
+        if not isinstance(dp.F, NamedProduct) or not isinstance(dp.R, NamedProduct):
+            raise ValueError(
+                f"subsystem {module_name!r} must have NamedProduct F and R "
+                f"(got F={type(dp.F).__name__}, R={type(dp.R).__name__})"
+            )
+        self._modules[module_name] = dp
+        return self
+
+    def constrain(
+        self,
+        target: str,
+        demand: Callable[[Mapping[str, Any]], Any],
+    ) -> "System":
+        """Add a constraint of the form ``target >= demand(ctx)``.
+
+        ``target`` is either ``"module_name.f_port"`` or the name of an
+        outer R. ``demand`` is a callable taking a dict ``ctx`` with the
+        outer F values and each subsystem R port under its dotted name.
+
+        Multiple constraints on the same target are joined with ``max``.
+        """
+        self._constraints.append((target, demand))
+        return self
+
+    # Convenience aliases mirroring MCDPL spelling.
+    sub = add
+    eq = constrain
+
+    # ------------------------------------------------------------------ #
+    # Internal validation
+    # ------------------------------------------------------------------ #
+    def _validate(self) -> None:
+        if not self._modules and not self._outer_R:
+            raise ValueError(
+                "System has no subsystems and no outer resources; nothing to solve"
+            )
+        if not self._outer_R:
+            raise ValueError("System must declare at least one requires()")
+
+        # Bucket constraints by target.
+        f_targets: Dict[tuple, List[Callable]] = {}
+        r_targets: Dict[str, List[Callable]] = {}
+        for target, fn in self._constraints:
+            if "." in target:
+                mod, port = target.split(".", 1)
+                if mod not in self._modules:
+                    raise ValueError(
+                        f"constraint targets unknown module {mod!r} "
+                        f"(known: {sorted(self._modules)})"
+                    )
+                if port not in self._modules[mod].F.components:
+                    raise ValueError(
+                        f"module {mod!r} has no F port {port!r} "
+                        f"(ports: {list(self._modules[mod].F.components)})"
+                    )
+                f_targets.setdefault((mod, port), []).append(fn)
+            else:
+                if target not in self._outer_R:
+                    raise ValueError(
+                        f"constraint target {target!r} is not an outer R "
+                        f"and is not in 'module.port' form"
+                    )
+                r_targets.setdefault(target, []).append(fn)
+
+        # Every subsystem F port and every outer R must have at least one
+        # constraint; otherwise the system is under-determined.
+        for mod_name, mod in self._modules.items():
+            for port in mod.F.components:
+                if (mod_name, port) not in f_targets:
+                    raise ValueError(
+                        f"subsystem {mod_name!r} F port {port!r} has no "
+                        "constraint; add one with constrain("
+                        f"\"{mod_name}.{port}\", ...)"
+                    )
+        for r_name in self._outer_R:
+            if r_name not in r_targets:
+                raise ValueError(
+                    f"outer R {r_name!r} has no constraint; add one with "
+                    f"constrain(\"{r_name}\", ...)"
+                )
+
+        self._f_targets = f_targets
+        self._r_targets = r_targets
+
+    # ------------------------------------------------------------------ #
+    # Build
+    # ------------------------------------------------------------------ #
+    def build(self) -> DesignProblem:
+        """Produce a plain DesignProblem; can then be passed to ``solve``."""
+        self._validate()
+        modules = dict(self._modules)
+        f_targets = self._f_targets
+        r_targets = self._r_targets
+
+        # Build the module-R bundle poset (axis of the internal loop).
+        module_R_bundle = NamedProduct({
+            mod_name: mod.R for mod_name, mod in modules.items()
+        })
+
+        # If there are subsystems, the loop axis bundles their R ports.
+        # If there aren't any, the System is purely algebraic and we can
+        # short-circuit with a flat AlgebraicDP-style FunctionDP.
+        if modules:
+            inner_F_components = dict(self._outer_F)
+            inner_F_components[_MODULES_AXIS] = module_R_bundle
+            inner_F = NamedProduct(inner_F_components)
+
+            inner_R_components = dict(self._outer_R)
+            inner_R_components[_MODULES_AXIS] = module_R_bundle
+            inner_R = NamedProduct(inner_R_components)
+        else:
+            inner_F = (
+                NamedProduct(dict(self._outer_F))
+                if self._outer_F else NamedProduct({"_": Reals()})
+            )
+            inner_R = NamedProduct(dict(self._outer_R))
+
+        outer_F_keys = list(self._outer_F)
+        outer_R_keys = list(self._outer_R)
+
+        def _ctx_with_modules(f_in: Mapping, modules_R: Mapping) -> Dict[str, Any]:
+            """Build the context dict for demand expression evaluation."""
+            ctx: Dict[str, Any] = {}
+            for k in outer_F_keys:
+                ctx[k] = f_in[k]
+            if modules_R is not None:
+                for mod_name, mod in modules.items():
+                    mr = modules_R[mod_name]
+                    for port_name in mod.R.components:
+                        ctx[f"{mod_name}.{port_name}"] = mr[port_name]
+            return ctx
+
+        def _eval_max(fns: List[Callable], ctx: Mapping) -> Any:
+            """Evaluate all demand fns in this constraint and take the join."""
+            value = None
+            for fn in fns:
+                v = fn(ctx)
+                if value is None:
+                    value = v
+                else:
+                    # join = max for chains; for richer posets, callers may
+                    # supply pre-joined demands. We default to max.
+                    try:
+                        value = max(value, v)
+                    except TypeError:
+                        value = v  # fall back to last; user takes responsibility
+            return value
+
+        # --- Inner h ----------------------------------------------------- #
+        def inner_h(f_in):
+            # Snapshot module R estimate (from the loop axis).
+            modules_R = f_in.get(_MODULES_AXIS) if modules else None
+            ctx_loop = _ctx_with_modules(f_in, modules_R)
+
+            # For each subsystem, compute its f from constraint demands,
+            # then call h. Collect the antichain.
+            module_antichains: Dict[str, Antichain] = {}
+            for mod_name, mod in modules.items():
+                f_M = {}
+                for port_name in mod.F.components:
+                    fns = f_targets[(mod_name, port_name)]
+                    f_M[port_name] = _eval_max(fns, ctx_loop)
+                try:
+                    a_M = mod.h(f_M)
+                except (OverflowError, ValueError, ZeroDivisionError):
+                    a_M = Antichain.singleton(mod.R, mod.R.top())
+                if a_M.is_empty():
+                    # No feasible point for this subsystem; the whole system
+                    # is infeasible at this loop iterate. Signal with a
+                    # top antichain so the outer iteration can detect it.
+                    a_M = Antichain.singleton(mod.R, mod.R.top())
+                module_antichains[mod_name] = a_M
+
+            # Cartesian product over subsystem antichains. Each combination
+            # is a candidate full module-R bundle; for each we compute the
+            # outer R values from the constraint expressions.
+            candidate_points: List[Dict[str, Any]] = []
+            module_names = list(modules.keys())
+            antichain_lists = [list(module_antichains[m]) for m in module_names]
+
+            for combo in itertools.product(*antichain_lists) if module_names else [()]:
+                modules_R_value: Dict[str, Any] = {}
+                for m_name, r_val in zip(module_names, combo):
+                    modules_R_value[m_name] = r_val
+
+                ctx_combo = _ctx_with_modules(f_in, modules_R_value)
+
+                outer_r_values: Dict[str, Any] = {}
+                for r_name in outer_R_keys:
+                    fns = r_targets[r_name]
+                    outer_r_values[r_name] = _eval_max(fns, ctx_combo)
+
+                out_point: Dict[str, Any] = dict(outer_r_values)
+                if module_names:
+                    out_point[_MODULES_AXIS] = modules_R_value
+                candidate_points.append(out_point)
+
+            return Antichain.from_set(inner_R, candidate_points)
+
+        inner = FunctionDP(
+            F=inner_F, R=inner_R, h_fn=inner_h, name=f"{self.name}_inner"
+        )
+        if not modules:
+            return inner
+        return Loop(inner, axis=_MODULES_AXIS)
+
+    # ------------------------------------------------------------------ #
+    # Repr
+    # ------------------------------------------------------------------ #
+    def __repr__(self) -> str:
+        lines = [f"System({self.name!r}):"]
+        if self._outer_F:
+            lines.append("  provides:")
+            for k, p in self._outer_F.items():
+                lines.append(f"    {k}: {p.name}")
+        if self._outer_R:
+            lines.append("  requires:")
+            for k, p in self._outer_R.items():
+                lines.append(f"    {k}: {p.name}")
+        if self._modules:
+            lines.append("  subsystems:")
+            for k, m in self._modules.items():
+                f_ports = ", ".join(m.F.components.keys())
+                r_ports = ", ".join(m.R.components.keys())
+                lines.append(f"    {k}: ({f_ports}) -> ({r_ports})")
+        if self._constraints:
+            lines.append("  constraints:")
+            for target, _ in self._constraints:
+                lines.append(f"    {target} >= <demand>")
+        return "\n".join(lines)

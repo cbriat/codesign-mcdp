@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codesign-mcdp"
+version = "0.1.0"
+description = "A Python library for Monotone Co-Design Problems (MCDPs) following Censi (2015)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["co-design", "mcdp", "design-problem", "pareto", "fixed-point", "lattice"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = []
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.5"]
+nb = ["matplotlib>=3.5", "nbformat>=5", "nbconvert>=7", "ipykernel>=6", "jupyter"]
+dev = ["matplotlib>=3.5", "nbformat>=5", "nbconvert>=7", "ipykernel>=6"]
+
+[project.urls]
+Homepage = "https://github.com/your-username/codesign-mcdp"
+Repository = "https://github.com/your-username/codesign-mcdp"
+"Paper (Censi 2015)" = "https://arxiv.org/abs/1512.08055"
+
+[tool.setuptools.packages.find]
+include = ["codesign*"]
+exclude = ["tests*", "examples*", "docs*", "notebooks*"]
