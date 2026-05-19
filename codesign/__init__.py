@@ -31,9 +31,11 @@ from .dp import (
     UncertainDP,
 )
 from .mcdpl import MCDP
+from .module import Module
 from .posets import Discrete, NamedProduct, Naturals, Poset, Reals
 from .primitives import adder, constant, identity, multiplier, scale
 from .solver import SolveResult, kleene_loop, minimize_cost, solve
+from .sugar import Expr, ModuleHandle, Port, exp, log, sqrt
 from .system import System
 
 __all__ = [
@@ -44,5 +46,6 @@ __all__ = [
     "Series", "Parallel", "Loop", "series", "par", "loop",
     "adder", "multiplier", "scale", "constant", "identity",
     "solve", "minimize_cost", "kleene_loop", "SolveResult",
-    "MCDP", "System",
+    "MCDP", "System", "Module",
+    "Expr", "ModuleHandle", "Port", "sqrt", "exp", "log",
 ]

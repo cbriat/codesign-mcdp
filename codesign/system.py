@@ -45,11 +45,41 @@ from .antichains import Antichain
 from .composition import Loop
 from .dp import DesignProblem, FunctionDP
 from .posets import NamedProduct, Poset, Reals
+from .sugar import Expr, ModuleHandle, Port, compile_expr
 
 
 # Internal name for the loop axis bundling every subsystem's R. Users
 # should never need to type this directly.
 _MODULES_AXIS = "__modules__"
+
+
+def _target_to_string(target) -> str:
+    """Normalise a constraint target to its string form.
+
+    Accepts either a plain string (legacy form) or a Port (operator-overloaded
+    form). Raises ``TypeError`` otherwise.
+    """
+    if isinstance(target, str):
+        return target
+    if isinstance(target, Port):
+        if target.kind == "module_f":
+            return target.full_name
+        if target.kind == "outer_r":
+            return target._port_name
+        if target.kind == "module_r":
+            raise TypeError(
+                f"Cannot constrain a module R port ({target.full_name!r}). "
+                f"R ports are determined by the module's h, not externally."
+            )
+        if target.kind == "outer_f":
+            raise TypeError(
+                f"Cannot constrain an outer F port ({target._port_name!r}). "
+                f"Outer F ports are system inputs, not constraint targets."
+            )
+    raise TypeError(
+        f"constraint target must be a string or a Port (got "
+        f"{type(target).__name__})"
+    )
 
 
 class System:
@@ -81,22 +111,46 @@ class System:
     # ------------------------------------------------------------------ #
     # Declarations
     # ------------------------------------------------------------------ #
-    def provides(self, name: str, *, unit: str = "", poset: Poset = None) -> "System":
-        """Declare an outer functionality. Defaults to ``Reals(unit=unit)``."""
+    def provides(self, name: str, *, unit: str = "", poset: Poset = None) -> Port:
+        """Declare an outer functionality.
+
+        Returns a :class:`~codesign.sugar.Port` handle that can be used in
+        operator-overloaded constraint expressions. For example::
+
+            endurance = sys.provides("endurance", unit="s")
+            battery.capacity >= endurance * actuator.power
+
+        The legacy usage that discards the return value continues to work;
+        constraints can still be added with the string-based
+        :meth:`constrain` form.
+        """
         if name in self._outer_F:
             raise ValueError(f"provides({name}) already declared")
         self._outer_F[name] = poset if poset is not None else Reals(unit=unit)
-        return self
+        return Port(self, None, name, "outer_f")
 
-    def requires(self, name: str, *, unit: str = "", poset: Poset = None) -> "System":
-        """Declare an outer resource. Defaults to ``Reals(unit=unit)``."""
+    def requires(self, name: str, *, unit: str = "", poset: Poset = None) -> Port:
+        """Declare an outer resource.
+
+        Returns a :class:`~codesign.sugar.Port` that can be the LHS of a
+        ``>=`` constraint, for example::
+
+            total_mass = sys.requires("total_mass", unit="kg")
+            total_mass >= battery.mass + payload
+        """
         if name in self._outer_R:
             raise ValueError(f"requires({name}) already declared")
         self._outer_R[name] = poset if poset is not None else Reals(unit=unit)
-        return self
+        return Port(self, None, name, "outer_r")
 
-    def add(self, module_name: str, dp: DesignProblem) -> "System":
-        """Add a subsystem under a unique name."""
+    def add(self, module_name: str, dp: DesignProblem) -> ModuleHandle:
+        """Add a subsystem under a unique name.
+
+        Returns a :class:`~codesign.sugar.ModuleHandle`. Attribute access on
+        the handle (``handle.port_name``) yields a
+        :class:`~codesign.sugar.Port` that can participate in constraint
+        expressions.
+        """
         if module_name in self._modules:
             raise ValueError(f"module name {module_name!r} already in use")
         if "." in module_name:
@@ -109,23 +163,41 @@ class System:
                 f"(got F={type(dp.F).__name__}, R={type(dp.R).__name__})"
             )
         self._modules[module_name] = dp
-        return self
+        return ModuleHandle(self, module_name, dp)
 
-    def constrain(
-        self,
-        target: str,
-        demand: Callable[[Mapping[str, Any]], Any],
-    ) -> "System":
-        """Add a constraint of the form ``target >= demand(ctx)``.
+    def constrain(self, target, demand) -> "System":
+        """Add a constraint of the form ``target >= demand``.
 
-        ``target`` is either ``"module_name.f_port"`` or the name of an
-        outer R. ``demand`` is a callable taking a dict ``ctx`` with the
-        outer F values and each subsystem R port under its dotted name.
+        ``target`` may be:
 
-        Multiple constraints on the same target are joined with ``max``.
+        - a string of the form ``"module.f_port"`` or an outer R name, or
+        - a :class:`~codesign.sugar.Port` (typically obtained from a
+          :class:`ModuleHandle` or from :meth:`provides` / :meth:`requires`).
+
+        ``demand`` may be:
+
+        - a callable taking a ``ctx`` dict (the legacy lambda form), or
+        - an :class:`~codesign.sugar.Expr` (the operator-overloaded form).
+
+        Both forms compile to the same internal callable. Multiple
+        ``constrain`` calls on the same target are joined with ``max``.
         """
-        self._constraints.append((target, demand))
+        target_str = _target_to_string(target)
+        if isinstance(demand, Expr):
+            fn = compile_expr(demand)
+            self._constraints.append((target_str, fn, demand))
+        elif callable(demand):
+            self._constraints.append((target_str, demand, None))
+        else:
+            raise TypeError(
+                f"demand must be a callable or an Expr (got "
+                f"{type(demand).__name__})"
+            )
         return self
+
+    def _register_expr_constraint(self, target: str, rhs_expr: Expr) -> None:
+        """Internal hook called by Port.__ge__ to register a constraint."""
+        self._constraints.append((target, compile_expr(rhs_expr), rhs_expr))
 
     # Convenience aliases mirroring MCDPL spelling.
     sub = add
@@ -145,7 +217,7 @@ class System:
         # Bucket constraints by target.
         f_targets: Dict[tuple, List[Callable]] = {}
         r_targets: Dict[str, List[Callable]] = {}
-        for target, fn in self._constraints:
+        for target, fn, _expr in self._constraints:
             if "." in target:
                 mod, port = target.split(".", 1)
                 if mod not in self._modules:
@@ -330,6 +402,9 @@ class System:
                 lines.append(f"    {k}: ({f_ports}) -> ({r_ports})")
         if self._constraints:
             lines.append("  constraints:")
-            for target, _ in self._constraints:
-                lines.append(f"    {target} >= <demand>")
+            for target, _fn, expr in self._constraints:
+                if expr is not None:
+                    lines.append(f"    {target} >= {expr.pretty()}")
+                else:
+                    lines.append(f"    {target} >= <lambda>")
         return "\n".join(lines)
