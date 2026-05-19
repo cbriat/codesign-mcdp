@@ -13,8 +13,9 @@ on GitHub without running anything.
 | 04 | [`04_uncertain_and_ode.ipynb`](04_uncertain_and_ode.ipynb) | `UncertainDP` brackets and `ODE_DP` steady states. |
 | 05 | [`05_visualize_kleene.ipynb`](05_visualize_kleene.ipynb) | Plots the Kleene ascent (structure of Fig. 36). |
 | 06 | [`06_drone_mcdpl_syntax.ipynb`](06_drone_mcdpl_syntax.ipynb) | Same drone, MCDPL-style declarative builder. |
-| 07 | [`07_drone_modular.ipynb`](07_drone_modular.ipynb) | Same drone, modular composition with `System`. |
-| 08 | [`08_vehicle_modular.ipynb`](08_vehicle_modular.ipynb) | Motor catalog + chassis + battery, multi-point Pareto front. |
+| 07 | [`07_drone_modular.ipynb`](07_drone_modular.ipynb) | Same drone, modular composition: `Module` classes + operator-overloaded constraints. |
+| 08 | [`08_vehicle_modular.ipynb`](08_vehicle_modular.ipynb) | Motor catalog + chassis + battery, multi-point Pareto front, with `>=` constraint syntax. |
+| 09 | [`09_robotic_arm.ipynb`](09_robotic_arm.ipynb) | Five-module robotic arm exercising non-trivial cyclic constraints. |
 
 ## Running locally
 

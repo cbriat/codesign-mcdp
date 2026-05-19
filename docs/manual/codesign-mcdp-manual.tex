@@ -1,0 +1,1127 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Packages
+% ---------------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{float}
+\usepackage[protrusion=true,expansion=false]{microtype}
+
+% ---------------------------------------------------------------------------
+% Colours and code listings
+% ---------------------------------------------------------------------------
+\definecolor{codebg}{rgb}{0.97,0.97,0.97}
+\definecolor{codekw}{rgb}{0.12,0.32,0.62}
+\definecolor{codestr}{rgb}{0.16,0.50,0.16}
+\definecolor{codecomm}{rgb}{0.45,0.45,0.45}
+\definecolor{codenum}{rgb}{0.55,0.55,0.55}
+
+\lstdefinestyle{python}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  commentstyle=\color{codecomm}\itshape,
+  numberstyle=\tiny\color{codenum},
+  numbers=left,
+  numbersep=8pt,
+  frame=single,
+  rulecolor=\color{codebg},
+  showstringspaces=false,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=12pt,
+  framexleftmargin=10pt,
+  framexrightmargin=0pt,
+  literate={->}{{$\rightarrow$}}1 {>=}{{$\geq$}}1 {<=}{{$\leq$}}1
+}
+\lstset{style=python}
+
+% ---------------------------------------------------------------------------
+% Theorems
+% ---------------------------------------------------------------------------
+\newtheorem{definition}{Definition}[section]
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{proposition}[definition]{Proposition}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{example}[definition]{Example}
+\newtheorem{remark}[definition]{Remark}
+
+% ---------------------------------------------------------------------------
+% Macros
+% ---------------------------------------------------------------------------
+\newcommand{\Rplus}{\mathbb{R}_{\geq 0}}
+\newcommand{\Rplustop}{\overline{\Rplus}}
+\newcommand{\Nat}{\mathbb{N}}
+\newcommand{\Min}{\mathsf{Min}}
+\newcommand{\Antichain}{\mathsf{A}}
+\newcommand{\topp}{\top}
+\newcommand{\codename}{\texttt{codesign-mcdp}}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  citecolor=blue!60!black,
+  urlcolor=blue!60!black,
+}
+
+% ---------------------------------------------------------------------------
+% Title
+% ---------------------------------------------------------------------------
+\title{\codename: A Python Library for \\ Monotone Co-Design Problems \\
+       \vspace{0.4em} \large Version 0.1.0 -- Reference Manual}
+\author{}
+\date{May 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent \codename{} is a Python library for formulating and solving
+\emph{Monotone Co-Design Problems} (MCDPs) in the framework of Censi
+(2015). A design problem is a relation between two posets, a functionality
+poset $F$ and a resource poset $R$; given a target functionality, the
+problem asks for the antichain of minimal resources needed to deliver it.
+Design problems compose under three operators (series, parallel,
+feedback), and the resulting class is closed under composition. The
+library implements the antichain calculus, six primitive design-problem
+types, the three composition operators, a Kleene fixed-point solver, two
+high-level builders (an MCDPL-style declarative builder and a modular
+\texttt{System} builder), and a collection of worked examples. This
+document is the reference manual for version 0.1.0.
+\end{abstract}
+
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+
+A \emph{co-design problem} is the joint design of components whose
+specifications mutually depend on each other. A canonical example: a
+battery must store enough energy to power an actuator, but the actuator
+must lift the battery itself, so the battery's mass appears in the
+energy it has to supply. There is no way to fix one without fixing the
+other.
+
+Censi (2015) showed that under modest monotonicity assumptions, such
+problems have a clean algebraic theory: the relations between resources
+and functionalities form a category closed under series, parallel, and
+feedback composition, and solutions are computed by a Kleene
+fixed-point iteration in the lattice of antichains. The original
+publication included a software tool, \texttt{MCDPL}, distributed
+through \texttt{co-design.science}, which exposes the framework via a
+domain-specific language.
+
+\codename{} is a from-scratch Python implementation of the algorithmic
+core, designed around composable Python objects rather than a separate
+DSL. It targets users who want to formulate and solve MCDPs from inside
+their existing Python codebase without context switches to a DSL or
+external solver. The library is small (about 2000 lines of Python), has
+no required runtime dependencies beyond the standard library, and is
+licensed under MIT.
+
+\paragraph{Scope of this document.} This manual covers the public API
+and the mathematical structure it implements. Section~\ref{sec:theory}
+recalls the formal background. Sections~\ref{sec:posets} through
+\ref{sec:solver} describe the data types, primitive DPs, composition
+operators, and the solver in detail. Sections~\ref{sec:mcdp-builder}
+and~\ref{sec:system-builder} document the two high-level builders.
+Section~\ref{sec:examples} walks through every example shipped with the
+library. Section~\ref{sec:guidelines} collects modelling guidelines and
+common pitfalls. Section~\ref{sec:limitations} discusses limitations
+and future directions.
+
+\paragraph{Conventions.} Code listings are typeset in monospaced font.
+Type signatures use Python's standard notation
+($\texttt{f: F} \rightarrow \texttt{R}$, for example). Mathematical
+quantities use $F$, $R$, $h$, $\top$, $\bot$, $\Min$, etc.
+
+% ===========================================================================
+\section{Mathematical Background}
+\label{sec:theory}
+% ===========================================================================
+
+This section recalls the formal definitions from Censi (2015) needed
+to specify the API. Proofs are omitted; the reader is referred to the
+paper for the full development.
+
+\subsection{Posets and Lattices}
+
+\begin{definition}[Poset]
+A \emph{poset} (partially ordered set) is a pair $(P, \leq)$ where
+$\leq$ is a reflexive, antisymmetric, transitive binary relation on
+the set $P$.
+\end{definition}
+
+\begin{definition}[Bottom and top]
+An element $\bot \in P$ is a \emph{bottom} (least element) if
+$\bot \leq x$ for every $x \in P$. An element $\topp \in P$ is a
+\emph{top} (greatest element) if $x \leq \topp$ for every $x \in P$.
+A poset has at most one bottom and at most one top.
+\end{definition}
+
+\begin{example}[Reals and Naturals]
+The non-negative reals augmented with infinity, $\Rplustop = \Rplus
+\cup \{+\infty\}$, ordered by the usual $\leq$, form a poset with
+$\bot = 0$ and $\topp = +\infty$. Likewise $\overline{\Nat} =
+\Nat \cup \{+\infty\}$.
+\end{example}
+
+\begin{example}[Product order]
+Given posets $(P_1, \leq_1), \dots, (P_n, \leq_n)$, the product
+$P_1 \times \cdots \times P_n$ with the componentwise order
+\[
+(x_1, \dots, x_n) \leq (y_1, \dots, y_n)
+  \iff \forall i.\, x_i \leq_i y_i
+\]
+is a poset. The bottom is $(\bot_1, \dots, \bot_n)$ and the top is
+$(\topp_1, \dots, \topp_n)$.
+\end{example}
+
+\begin{definition}[Antichain]
+A subset $A \subseteq P$ is an \emph{antichain} if no two distinct
+elements of $A$ are comparable: $\forall x, y \in A,\ x \leq y \implies x = y$.
+We write $\Antichain[P]$ for the set of all antichains of $P$.
+\end{definition}
+
+\begin{definition}[Min operator]
+For any subset $S \subseteq P$, the \emph{Min operator} returns the
+set of minimal elements:
+\[
+\Min(S) = \{ x \in S : \nexists y \in S.\, y < x \}.
+\]
+$\Min(S)$ is always an antichain. For a finite $S$, $\Min(S)$ is the
+Pareto front of $S$.
+\end{definition}
+
+\subsection{Antichains as a Lattice}
+
+The set of antichains of a poset carries a natural order: $A \leq A'$
+in $\Antichain[P]$ iff every point in $A'$ is dominated by some point
+in $A$. Intuitively, $A \leq A'$ means $A$ is "lower" or "easier",
+having weaker Pareto-minimal demands.
+
+\begin{proposition}
+$(\Antichain[P], \leq)$ is a complete lattice when $P$ is finite or
+chain-complete. Joins are computed by union followed by $\Min$. The
+bottom of $\Antichain[P]$ is $\{\bot_P\}$ (or $\emptyset$ if $P$ has
+no bottom); the top is $\emptyset$.
+\end{proposition}
+
+This lattice is the state space of the Kleene iteration (Section
+\ref{sec:loop}).
+
+\subsection{Design Problems}
+
+\begin{definition}[Design Problem]
+A \emph{design problem (DP)} is a tuple $\langle F, R, h \rangle$
+where $F$ and $R$ are posets and $h : F \to \Antichain[R]$ is a
+function from functionality requests to antichains of resources.
+$h(f)$ is interpreted as the Pareto front of minimal resources
+required to deliver functionality $f$.
+\end{definition}
+
+\begin{definition}[Monotone Design Problem]
+A DP $\langle F, R, h \rangle$ is \emph{monotone} (an MCDP) if $h$
+is monotone with respect to the antichain order: $f \leq f'$ in $F$
+implies $h(f) \leq h(f')$ in $\Antichain[R]$.
+\end{definition}
+
+Intuitively, monotonicity says that demanding more functionality
+cannot reduce the minimal resources needed. This corresponds to the
+common-sense engineering principle that you don't get more for less.
+
+\subsection{Composition}
+
+The class of MCDPs is closed under three operators.
+
+\begin{definition}[Series]
+Given DPs $d_1 = \langle F, M, h_1 \rangle$ and $d_2 = \langle M, R,
+h_2 \rangle$ whose interface poset $M$ matches, their \emph{series
+composition} is
+\[
+(d_1 \circ d_2)(f) = \Min\!\left( \bigcup_{r_1 \in h_1(f)} h_2(r_1) \right).
+\]
+\end{definition}
+
+\begin{definition}[Parallel]
+Given DPs $d_1 = \langle F_1, R_1, h_1 \rangle$ and $d_2 = \langle
+F_2, R_2, h_2 \rangle$, their \emph{parallel composition} is
+$\langle F_1 \times F_2, R_1 \times R_2, h_1 \otimes h_2 \rangle$ where
+\[
+(h_1 \otimes h_2)(f_1, f_2) = \Min\!\left( h_1(f_1) \times h_2(f_2) \right).
+\]
+\end{definition}
+
+\begin{definition}[Feedback]
+Given a DP $d = \langle F \times X, R \times X, h \rangle$ with a
+common factor $X$, the \emph{feedback composition} on $X$ is the DP
+$d^{\dagger X} = \langle F, R, h^{\dagger X} \rangle$ where $h^{\dagger
+X}(f)$ is the antichain obtained by closing the recursion on $X$.
+\end{definition}
+
+The recursion is solved by Kleene iteration in $\Antichain[R \times
+X]$, seeded at $\{\bot\}$ and ascending until a fixed point is
+reached.
+
+\subsection{The Kleene Fixed-Point Algorithm}
+
+\begin{theorem}[Censi 2015, Prop. 4]
+\label{thm:kleene}
+For an MCDP $d = \langle F \times X, R \times X, h \rangle$ closed
+on $X$, define the operator $\Phi_f : \Antichain[R \times X] \to
+\Antichain[R \times X]$ by
+\[
+\Phi_f(A) = \Min\!\left( \bigcup_{r \in A} h(f, r_X) \cap \uparrow\! r \right),
+\]
+where $r_X$ is the $X$-component of $r$ and $\uparrow\!r$ is the
+upward closure. Then $\Phi_f$ is monotone, and the Kleene ascent
+\[
+A_0 = \{\bot\},\quad A_{k+1} = \Phi_f(A_k)
+\]
+converges to the least fixed point, which equals
+$h^{\dagger X}(f)$ projected to $\Antichain[R]$.
+\end{theorem}
+
+In implementation, the iteration terminates when one of three
+conditions holds: $A_{k+1} = A_k$ (fixed point), $A_{k+1} = \emptyset$
+(infeasibility), or every point in $A_{k+1}$ has $r_X = \topp_X$
+(loop axis saturates).
+
+% ===========================================================================
+\section{Installation and Project Layout}
+\label{sec:install}
+% ===========================================================================
+
+\codename{} requires Python 3.9 or newer. The package has no
+required runtime dependencies; \texttt{matplotlib} is needed only for
+example~05.
+
+\paragraph{Installation.} Clone the repository and install in editable
+mode:
+\begin{lstlisting}[language=bash]
+git clone https://github.com/your-username/codesign-mcdp.git
+cd codesign-mcdp
+pip install -e .
+\end{lstlisting}
+
+\paragraph{Optional extras.}
+\begin{itemize}[leftmargin=2em]
+  \item \texttt{pip install -e ".[viz]"} adds matplotlib for the
+        visualisation example.
+  \item \texttt{pip install -e ".[nb]"} adds the Jupyter tooling needed
+        to (re)generate the notebooks.
+\end{itemize}
+
+\paragraph{Repository layout.}
+\begin{verbatim}
+codesign-mcdp/
+  codesign/          the Python package (9 modules)
+  examples/          eight runnable example scripts
+  notebooks/         the same examples as executed .ipynb notebooks
+  tests/             smoke tests
+  docs/              this manual plus rendered trace images
+  build_notebooks.py script to regenerate the notebooks
+  pyproject.toml     packaging metadata, PEP 621
+  .github/workflows/ CI configuration
+\end{verbatim}
+
+% ===========================================================================
+\section{Core Data Types}
+\label{sec:posets}
+% ===========================================================================
+
+This section documents the data types provided by
+\texttt{codesign.posets} and \texttt{codesign.antichains}.
+
+\subsection{Posets}
+
+The \texttt{Poset} abstract base class has the following interface:
+
+\begin{lstlisting}
+class Poset(ABC):
+    name: str
+
+    def leq(self, x, y) -> bool: ...      # is x <= y?
+    def eq(self, x, y) -> bool: ...
+    def lt(self, x, y) -> bool: ...
+    def bottom(self): ...                  # least element, if any
+    def top(self): ...                     # greatest element, if any
+    def is_bottom(self, x) -> bool: ...
+    def is_top(self, x) -> bool: ...
+    def join(self, x, y): ...              # least upper bound
+    def format(self, x) -> str: ...
+\end{lstlisting}
+
+Four concrete poset classes are provided.
+
+\paragraph{\texttt{Reals(unit="")}.} The non-negative reals augmented
+with $+\infty$. Bottom is $0.0$; top is \texttt{math.inf}. The optional
+\texttt{unit} string is used for pretty-printing only.
+
+\paragraph{\texttt{Naturals(unit="")}.} The non-negative integers
+augmented with $+\infty$. Bottom is $0$; top is \texttt{math.inf}.
+
+\paragraph{\texttt{NamedProduct(components: dict[str, Poset])}.}
+The componentwise-ordered product of named factor posets. Elements
+are Python dicts mapping component names to values. The bottom is the
+dict of all bottoms; the top is the dict of all tops.
+\texttt{NamedProduct} can be nested freely: a component poset may
+itself be a \texttt{NamedProduct}.
+
+\paragraph{\texttt{Discrete(elements, leq=None)}.} A finite poset with
+explicit element set and a caller-supplied \texttt{leq} predicate.
+Useful for catalog-like enumerations where the order is not the
+default discrete order.
+
+\subsection{Antichains}
+
+The \texttt{Antichain} class wraps a set of poset elements together
+with the poset they live in. The constructor normalises the input by
+removing dominated points and deduplicating.
+
+\begin{lstlisting}
+class Antichain:
+    poset: Poset
+    points: tuple
+
+    @classmethod
+    def of_bottom(cls, poset) -> "Antichain": ...
+    @classmethod
+    def empty(cls, poset) -> "Antichain": ...
+    @classmethod
+    def singleton(cls, poset, point) -> "Antichain": ...
+    @classmethod
+    def from_set(cls, poset, points) -> "Antichain": ...
+
+    def union_min(self, other) -> "Antichain": ...
+    def filter_above(self, floor) -> "Antichain": ...
+    def leq(self, other) -> bool: ...
+    def eq(self, other) -> bool: ...
+    def has_any_top(self) -> bool: ...
+    def is_empty(self) -> bool: ...
+\end{lstlisting}
+
+The two key operations on antichains are \texttt{union\_min}, which
+takes the union of two antichains and re-applies $\Min$, and
+\texttt{filter\_above}, which keeps only points dominating a given
+floor. Together they implement the body of the Kleene iteration in
+Theorem~\ref{thm:kleene}.
+
+% ===========================================================================
+\section{Primitive Design Problem Types}
+\label{sec:primitives}
+% ===========================================================================
+
+Six concrete subclasses of \texttt{DesignProblem} are provided, each
+appropriate for a different style of relation between functionality
+and resources.
+
+\subsection{\texttt{AlgebraicDP}}
+
+For relations where each resource is a closed-form monotone function
+of the functionality.
+
+\begin{lstlisting}
+AlgebraicDP(
+    F: NamedProduct,
+    R: NamedProduct,
+    equations: dict[str, Callable[[dict], float]],
+    name: str = "algebraic",
+)
+\end{lstlisting}
+
+The \texttt{equations} dictionary maps each resource name to a
+callable taking a functionality dict and returning a scalar.
+\texttt{h(f)} returns a singleton antichain.
+
+\begin{example}
+A battery sized by specific energy:
+\begin{lstlisting}
+battery = AlgebraicDP(
+    F=NamedProduct({"capacity": Reals(unit="J")}),
+    R=NamedProduct({"mass": Reals(unit="kg")}),
+    equations={"mass": lambda f: f["capacity"] / 1.8e6},
+)
+\end{lstlisting}
+\end{example}
+
+\subsection{\texttt{FunctionDP}}
+
+For relations where the user supplies \texttt{h} directly as a
+function from functionality dicts to antichains. Use this when the
+relation is multi-valued (a true Pareto front) or has branching logic.
+
+\begin{lstlisting}
+FunctionDP(
+    F: NamedProduct,
+    R: NamedProduct,
+    h_fn: Callable[[dict], Antichain],
+    name: str = "function",
+)
+\end{lstlisting}
+
+\subsection{\texttt{CatalogDP}}
+
+For selecting from a finite catalog of implementations (motors,
+batteries, sensors).
+
+\begin{lstlisting}
+CatalogDP(
+    F: NamedProduct,
+    R: NamedProduct,
+    catalog: list[CatalogEntry],
+    name: str = "catalog",
+)
+
+CatalogEntry(
+    name: str,
+    provides: dict[str, Any],
+    costs: dict[str, Any],
+)
+\end{lstlisting}
+
+For a request $f$, $h(f)$ is the antichain of $\texttt{entry.costs}$
+for every entry whose \texttt{provides} dominates $f$ in $F$. Entries
+that are dominated by another feasible entry are pruned by $\Min$ in
+$R$.
+
+\subsection{\texttt{ConstraintDP}}
+
+A feasibility predicate plus a scalar cost, lifted to $\Min$. Useful
+when the resource-functionality relation is most natural to express
+as \emph{is this choice good enough, and how much does it cost?}.
+
+\begin{lstlisting}
+ConstraintDP(
+    F: NamedProduct,
+    R: NamedProduct,
+    sampler: Callable[[dict], Iterable[dict]],
+    feasible: Callable[[dict, dict], bool],
+    cost: Callable[[dict, dict], dict],
+    name: str = "constraint",
+)
+\end{lstlisting}
+
+The \texttt{sampler} yields candidate resource dicts for the given
+functionality; \texttt{feasible} filters them; \texttt{cost} maps the
+feasible ones into the resource poset, and the result is reduced by
+$\Min$.
+
+\subsection{\texttt{ODE\_DP}}
+
+Derives a monotone resource relation from a differential equation
+$\dot x = \text{rhs}(x, t, f)$. Two modes are supported.
+
+\paragraph{Final value} integrates the ODE from $t = 0$ to
+$t = t_{\text{end}}$ by explicit Euler and reports the extracted
+resources of the final state.
+
+\paragraph{Steady state} solves $\text{rhs}(x, \cdot, f) = 0$ for $x$
+by Newton iteration and reports the extracted resources of the
+steady-state value.
+
+\begin{lstlisting}
+ODE_DP(
+    F: NamedProduct,
+    R: NamedProduct,
+    rhs: Callable,
+    extract: Callable[[state], dict],
+    mode: str,            # "final_value" or "steady_state"
+    t_end: float = 1.0,
+    n_steps: int = 100,
+    x0_fn: Callable[[dict], Any] = ...,
+    name: str = "ode",
+)
+\end{lstlisting}
+
+\subsection{\texttt{UncertainDP}}
+
+Brackets an unknown $h$ with a known lower and upper bound. The
+optimistic mode (\texttt{lower}) yields a lower bound on the minimal
+resources; the pessimistic mode (\texttt{upper}) yields an upper
+bound. Section~VII of Censi (2015) develops the theory.
+
+\begin{lstlisting}
+UncertainDP(
+    F: NamedProduct,
+    R: NamedProduct,
+    lower: DesignProblem,
+    upper: DesignProblem,
+    mode: str = "upper",
+    name: str = "uncertain",
+)
+\end{lstlisting}
+
+\texttt{with\_mode("lower" | "upper")} returns the bracket selected
+for solving.
+
+% ===========================================================================
+\section{Composition Operators}
+\label{sec:composition}
+% ===========================================================================
+
+\subsection{Series}
+
+\begin{lstlisting}
+series(dp1: DesignProblem, dp2: DesignProblem) -> Series
+Series(dp1, dp2)
+\end{lstlisting}
+
+Requires \texttt{dp1.R == dp2.F} structurally (same component names
+and posets). Implements the series definition: for each point of
+$h_1(f)$ run $h_2$ and take the union $\Min$.
+
+\subsection{Parallel}
+
+\begin{lstlisting}
+par(dp1: DesignProblem, dp2: DesignProblem) -> Parallel
+Parallel(dp1, dp2)
+\end{lstlisting}
+
+Requires non-overlapping component names in $F_1, F_2$ and in
+$R_1, R_2$. The output $F$ and $R$ are the concatenated
+\texttt{NamedProduct}s. The antichain is the Cartesian product
+followed by $\Min$.
+
+\subsection{Loop}
+\label{sec:loop}
+
+\begin{lstlisting}
+loop(inner: DesignProblem, axis: str) -> Loop
+Loop(inner, axis="...")
+\end{lstlisting}
+
+Closes the feedback loop on a single named axis that must appear in
+both \texttt{inner.F} and \texttt{inner.R}. The resulting DP has
+\texttt{F = inner.F} minus the axis and \texttt{R = inner.R} minus
+the axis. Calling \texttt{h(f)} triggers the Kleene fixed-point
+iteration described in Theorem~\ref{thm:kleene}.
+
+\begin{remark}[Multiple feedback loops]
+\texttt{Loop} closes one axis at a time. To close several loops,
+chain them: \texttt{loop(loop(inner, axis="x"), axis="y")}. The
+\texttt{System} builder (Section~\ref{sec:system-builder}) closes all
+feedback loops simultaneously over a single bundled axis, which is
+usually more convenient.
+\end{remark}
+
+% ===========================================================================
+\section{The Solver}
+\label{sec:solver}
+% ===========================================================================
+
+\subsection{Top-level entry point}
+
+\begin{lstlisting}
+solve(
+    dp: DesignProblem,
+    functionality: dict | None,
+    *,
+    max_iter: int = 200,
+    record_trace: bool = False,
+) -> SolveResult
+\end{lstlisting}
+
+The result is a dataclass with the following fields:
+\begin{lstlisting}
+@dataclass
+class SolveResult:
+    antichain: Antichain      # the Pareto front (in dp.R)
+    iterations: int           # Kleene steps taken (0 if no loop)
+    converged: bool           # True if a fixed point was reached
+    feasible: bool            # True if antichain has finite, nonempty points
+    trace: list[Antichain]    # the sequence A_0, A_1, ... if recorded
+\end{lstlisting}
+
+\subsection{The Kleene iteration}
+
+\begin{lstlisting}
+kleene_loop(
+    loop_dp: Loop,
+    f_outer: dict,
+    *,
+    max_iter: int = 200,
+    record_trace: bool = False,
+    trace_out: list | None = None,
+    info_out: dict | None = None,
+) -> Antichain
+\end{lstlisting}
+
+The body of the iteration is direct from Theorem~\ref{thm:kleene}. The
+implementation adds:
+\begin{itemize}
+  \item a \emph{divergence cap} of $10^{30}$ that converts an iterate
+        exceeding the cap to $\topp$, so floating-point overflow
+        becomes infeasibility rather than \texttt{inf}/\texttt{nan};
+  \item \texttt{try}/\texttt{except} around the inner $h$ to catch
+        \texttt{OverflowError}, \texttt{ValueError}, and
+        \texttt{ZeroDivisionError}, again mapping to $\topp$;
+  \item three termination conditions: fixed point reached, antichain
+        empty (infeasible), or every point's loop axis equal to
+        $\topp$ (provably infeasible).
+\end{itemize}
+
+\subsection{Scalar minimisation over an antichain}
+
+\begin{lstlisting}
+minimize_cost(
+    result: SolveResult,
+    cost_fn: Callable[[dict], float],
+) -> dict | None
+\end{lstlisting}
+
+Returns the single resource bundle in \texttt{result.antichain} that
+minimises \texttt{cost\_fn}, or \texttt{None} if the result is
+infeasible. This is the scalarisation step that turns a Pareto front
+into a single engineering choice.
+
+% ===========================================================================
+\section{The MCDP Builder}
+\label{sec:mcdp-builder}
+% ===========================================================================
+
+The \texttt{MCDP} class in \texttt{codesign.mcdpl} provides an
+MCDPL-style declarative syntax for a single self-contained design
+problem.
+
+\begin{lstlisting}
+with MCDP("name") as m:
+    m.provides("functionality_name", unit="...")    # outer F port
+    m.requires("resource_name",     unit="...")    # outer R port
+
+    m.constraint("resource_name", lambda f: <expr>)   # closed-form
+    # or
+    m.rule(lambda f: Antichain.from_set(...))         # multi-valued
+
+    m.loop_on("axis_name")    # optional, may be repeated
+
+dp = m.build()
+\end{lstlisting}
+
+The builder emits an \texttt{AlgebraicDP} or \texttt{FunctionDP}
+internally, then wraps it in \texttt{Loop}s as requested by
+\texttt{loop\_on}. Multiple \texttt{constraint} calls on the same
+target are joined (max). Mostly useful when the model has a small
+number of variables and reads naturally as a list of $\geq$
+inequalities, mirroring the paper's \texttt{mcdp \{ ... \}} blocks.
+
+% ===========================================================================
+\section{The System Builder}
+\label{sec:system-builder}
+% ===========================================================================
+
+For larger designs the \texttt{System} class in \texttt{codesign.system}
+provides modular composition with named subsystems and algebraic
+connection constraints. This is the recommended way to build
+non-trivial co-design models. Two equivalent surface syntaxes are
+available: the operator-overloaded form (recommended for new code) and
+the legacy lambda form (still supported).
+
+\subsection{Operator-overloaded syntax (recommended)}
+
+\texttt{provides}, \texttt{requires}, and \texttt{add} each return a
+port handle. Arithmetic operators on handles build expression trees
+lazily; the \texttt{>=} operator registers a constraint with the parent
+system.
+
+\begin{lstlisting}
+from codesign import Module, Reals, System, solve
+
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+    def h(self, f):
+        return {"mass": f["capacity"] / 1.8e6}
+
+class Actuator(Module):
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+    def h(self, f):
+        return {"power": 10.0 * f["lift_force"] ** 2}
+
+sys = System("drone")
+endurance     = sys.provides("endurance",     unit="s")
+extra_payload = sys.provides("extra_payload", unit="kg")
+extra_power   = sys.provides("extra_power",   unit="W")
+total_mass    = sys.requires("total_mass",    unit="kg")
+
+battery  = sys.add("battery",  Battery())
+actuator = sys.add("actuator", Actuator())
+
+battery.capacity    >= (actuator.power + extra_power) * endurance
+actuator.lift_force >= 9.81 * (battery.mass + extra_payload)
+total_mass          >= battery.mass + extra_payload
+
+drone = sys.build()
+\end{lstlisting}
+
+The four port kinds are:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Outer F} (from \texttt{provides}): can appear on the RHS
+        of constraint expressions. Cannot be a constraint target.
+  \item \textbf{Outer R} (from \texttt{requires}): can be a constraint
+        target. Cannot appear in expression RHS.
+  \item \textbf{Module F} (\texttt{handle.f\_port}): can be a constraint
+        target. Cannot appear in expression RHS (its value is determined
+        by the constraints on it, not by the current iteration state).
+  \item \textbf{Module R} (\texttt{handle.r\_port}): can appear in
+        expression RHS. Cannot be a constraint target (its value is
+        determined by the module's own \texttt{h}, not externally).
+\end{itemize}
+
+Misusing a port (e.g.\ trying to put a module F port on the RHS, or
+constraining an outer F) raises immediately with a message naming the
+port and explaining the rule. F and R port names within a single
+subsystem must be disjoint.
+
+The supported operators are \texttt{+, -, *, /, **,} unary \texttt{-},
+along with the helper functions \texttt{codesign.sqrt}, \texttt{exp},
+and \texttt{log} for expressions that need transcendental terms. For
+demands that cannot be expressed algebraically, the legacy lambda form
+remains available and can be mixed freely with the operator form (see
+below).
+
+\subsection{Legacy lambda syntax}
+
+\begin{lstlisting}
+sys.constrain("battery.capacity",
+              lambda x: (x["actuator.power"] + x["extra_power"]) * x["endurance"])
+sys.constrain("actuator.lift_force",
+              lambda x: 9.81 * (x["battery.mass"] + x["extra_payload"]))
+sys.constrain("total_mass",
+              lambda x: x["battery.mass"] + x["extra_payload"])
+\end{lstlisting}
+
+The argument \texttt{x} is a dict carrying outer F values under their
+bare names (\texttt{x["endurance"]}) and subsystem R ports under their
+dotted names (\texttt{x["battery.mass"]}). Both syntaxes compile to the
+same internal representation; the operator form is purely sugar.
+
+\subsection{Class-based modules}
+
+The \texttt{Module} base class lets a design problem be defined
+declaratively:
+
+\begin{lstlisting}
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+
+    def __init__(self, specific_energy=1.8e6):
+        self.specific_energy = specific_energy
+        super().__init__()
+
+    def h(self, f):
+        return {"mass": f["capacity"] / self.specific_energy}
+\end{lstlisting}
+
+A \texttt{Module} subclass declares its $F$ and $R$ ports as
+class-level dicts and overrides \texttt{h(self, f)}. The constructor
+wires everything into the underlying \texttt{DesignProblem} machinery.
+Parameterised modules are written by overriding \texttt{\_\_init\_\_}
+and calling \texttt{super().\_\_init\_\_()} after setting any
+instance attributes. \texttt{h} may return a dict (treated as a
+singleton antichain), a list of dicts (multi-valued antichain), or
+an \texttt{Antichain} directly.
+
+\subsection{Semantics}
+
+The \texttt{build} method emits a \texttt{Loop} whose axis bundles
+every subsystem's resource poset:
+\[
+\texttt{\_\_modules\_\_} =
+  \prod_{m \in \mathrm{modules}} R_m.
+\]
+The inner DP performs one Kleene step:
+\begin{enumerate}[leftmargin=2em]
+  \item Read the current bundle estimate to populate
+        $\mathtt{ctx[m.r]}$ for every subsystem $R$ port.
+  \item For each subsystem $m$, evaluate the constraint demands on
+        its $F$ ports to obtain $f_m$, then call $m.h(f_m)$ to obtain
+        an antichain.
+  \item Take the Cartesian product across subsystems; for each
+        combination, evaluate the outer-$R$ constraint demands to
+        produce a candidate point.
+  \item Return the resulting antichain.
+\end{enumerate}
+The outer Kleene iteration converges over all subsystem $R$ ports
+simultaneously.
+
+\subsection{Validation}
+
+\texttt{build} performs the following checks:
+\begin{itemize}[leftmargin=2em]
+  \item every subsystem $F$ port has at least one \texttt{constrain}
+        target;
+  \item every outer $R$ has at least one \texttt{constrain} target;
+  \item every constraint target refers to a known module $F$ port or a
+        declared outer $R$;
+  \item module names do not clash with the reserved axis name
+        \texttt{\_\_modules\_\_} and contain no \texttt{.}.
+\end{itemize}
+If any check fails, \texttt{build} raises \texttt{ValueError} with a
+message identifying the missing or invalid item.
+
+% ===========================================================================
+\section{Worked Examples}
+\label{sec:examples}
+% ===========================================================================
+
+The package ships eight runnable examples under \texttt{examples/} and
+the same eight as executed notebooks under \texttt{notebooks/}. Each is
+referenced below by its filename.
+
+\subsection{Example 1: the drone (Fig. 48 of the paper)}
+
+\texttt{01\_drone.py}. The canonical MCDP from the paper. A battery
+powers an actuator that must lift the battery plus a payload, with
+extra fixed payload and avionics power. The model is a single
+\texttt{FunctionDP} closed by \texttt{Loop} on \texttt{battery\_mass}.
+The example sweeps five mission profiles, three feasible and two
+infeasible. Iteration counts range from 8 to 41 depending on how
+close to the feasibility boundary the case is.
+
+\subsection{Example 2: integer optimisation (Sec. VI-D)}
+
+\texttt{02\_integer\_optimization.py}. The problem
+\[
+x + y \geq \lceil\sqrt{x}\rceil + \lceil\sqrt{y}\rceil + c
+\]
+over $\Nat \times \Nat$, parametrised by $c$. The inner DP enumerates
+all valid splits of the deficit, producing a multi-point antichain at
+each iteration. For $c = 4$ the iteration converges in six steps to
+$M(4) = \{(0,7), (3,6), (4,4), (6,3), (7,0)\}$. The example notes
+that the paper's claim $M(1) = \{(1,0), (0,1)\}$ contains a typo;
+the correct answer is $\{(0,3), (3,0)\}$, which is what the solver
+finds.
+
+\subsection{Example 3: AUV seabed surveying (Sec. VIII)}
+
+\texttt{03\_auv\_seabed.py}. An autonomous underwater vehicle sweeps
+an area $A$ at velocity $v$ with sensor radius $r$. Cyclic constraints
+couple time, energy, and cost. The example enumerates a small set of
+$(v, r)$ tradeoffs per iteration, producing a three-point Pareto
+front per scenario.
+
+\subsection{Example 4: \texttt{UncertainDP} and \texttt{ODE\_DP}}
+
+\texttt{04\_uncertain\_and\_ode.py}. Two demos of the advanced
+primitives. First: a battery whose specific energy is known only to
+lie in $[1.6, 2.0]$ MJ/kg; the lower and upper brackets give
+optimistic and pessimistic masses. Second: a heater whose steady-state
+input power is recovered from Newton's law of cooling via
+\texttt{ODE\_DP}.
+
+\subsection{Example 5: visualising the Kleene ascent}
+
+\texttt{05\_visualize\_kleene.py}. Uses matplotlib to render the
+sequence $A_0, A_1, \ldots$ for the Sec. VI-D problem, reproducing
+the structure of Fig. 36 in the paper. PNGs for $c \in \{1, 4, 8\}$
+are committed under \texttt{docs/images/}.
+
+\subsection{Example 6: the drone in MCDPL syntax}
+
+\texttt{06\_drone\_mcdpl\_syntax.py}. Rebuilds the drone with the
+\texttt{MCDP} builder. The model reads almost identically to the
+\texttt{mcdp \{ ... \}} block in Fig. 48 of the paper. Output is
+identical to example~1.
+
+\subsection{Example 7: the drone, modular}
+
+\texttt{07\_drone\_modular.py}. Rebuilds the drone with the
+\texttt{System} builder. Battery and actuator are defined as
+\texttt{Module} subclasses with their own $F$ and $R$, then wired
+together with three \texttt{>=} constraints in the operator-overloaded
+syntax. Fixed-point values match example~1 exactly; iteration counts
+are roughly $2\times$ because the bundle now has two coupled axes
+(battery mass, actuator power) instead of one.
+
+\subsection{Example 8: a modular vehicle with Pareto tradeoffs}
+
+\texttt{08\_vehicle\_modular.py}. Three independent subsystems: a
+\texttt{CatalogDP} motor (seven Pareto-incomparable entries), a
+linear chassis, and a battery. Five \texttt{>=} constraints close the
+loop on (motor, chassis, battery) resources. Two of the three mission
+profiles yield two-point system Pareto fronts (different motor choices
+trading total mass against total cost); the third is infeasible
+because no motor in the catalog can supply enough torque once the
+chassis grows to support the battery.
+
+\subsection{Example 9: a robotic arm with non-trivial topology}
+
+\texttt{09\_robotic\_arm.py}. Five subsystems (shoulder joint, elbow
+joint, sensor, controller, battery) wired with eight constraints. The
+connection graph is genuinely non-trivial: the controller's power
+demand depends on both the sensor rate and the joint command rate, the
+shoulder must support the elbow joint's mass at the end of its arm
+(introducing a mechanical cycle through \texttt{elbow.mass}), and the
+battery is sized by the integrated power of every electrical
+subsystem. The Kleene iteration resolves the resulting cycles in four
+steps for all three test mission profiles. This example is the cleanest
+demonstration of where the operator-overloaded syntax pays off: each
+constraint line states one physical relationship, and the cyclic
+structure emerges from the constraint graph rather than from explicit
+loop machinery.
+
+% ===========================================================================
+\section{Modelling Guidelines and Pitfalls}
+\label{sec:guidelines}
+% ===========================================================================
+
+A few patterns that come up repeatedly when authoring MCDPs.
+
+\paragraph{Expose loop variables you want to inspect.} When using the
+operator API directly, \texttt{Loop} projects its axis out of the
+outer $R$. To inspect the converged loop value, include it in the
+inner $R$ under a \emph{different name}: for example, both
+\texttt{battery\_mass} as the loop axis and \texttt{report\_mass}
+mirrored for outer-$R$ visibility. The \texttt{System} builder
+handles this transparently.
+
+\paragraph{Cap physical maxima.} When a design variable has a
+physical ceiling ($v_{\max}$, $r_{\max}$), make $h$ return a
+$\topp$-valued antichain whenever the iterate exceeds it. The Kleene
+ascent will then converge to infeasibility rather than oscillating
+or diverging.
+
+\paragraph{Use \texttt{FunctionDP} or \texttt{CatalogDP} for breadth.}
+\texttt{AlgebraicDP} always returns a singleton antichain. For a
+genuine Pareto front, use \texttt{FunctionDP} (enumerate the
+tradeoffs explicitly) or \texttt{CatalogDP} (provide multiple
+incomparable entries).
+
+\paragraph{Scalarisation is downstream.} The MCDP solver returns the
+Pareto front. Choosing which point to ship is a separate concern:
+apply \texttt{minimize\_cost} with a scalar objective, or inspect the
+front and pick by hand.
+
+\paragraph{Catalog Cartesian product can blow up.} When several
+subsystems return multi-valued antichains, the inner $h$ of the
+\texttt{System} takes their Cartesian product. For typical models
+(one or two catalog subsystems among many algebraic ones), this is
+not a bottleneck; but if many subsystems are catalog-driven, the
+inner antichain may grow large between $\Min$ prunings.
+
+\paragraph{Numerical precision in feedback loops.}
+\texttt{Antichain.eq} compares points exactly. For contractive
+floating-point feedback, the iteration may oscillate by an ulp near
+the fixed point and consume many iterations before converging. The
+divergence cap and \texttt{max\_iter} guard against runaway, but
+choosing \texttt{max\_iter} generously (200 to 500) is wise for
+nontrivial models.
+
+% ===========================================================================
+\section{Limitations and Future Work}
+\label{sec:limitations}
+% ===========================================================================
+
+Version 0.1.0 covers the algorithmic core: posets, antichains, six
+primitive DP types, three composition operators, the Kleene solver,
+and the two builders. The following are intentional omissions, all
+tractable extensions:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{MCDPL surface syntax}. The paper's
+        \texttt{mcdp \{ ... \}} text format is not parsed. The
+        \texttt{MCDP} builder gives the same shape in Python.
+  \item \textbf{Non-finitely-representable antichains}. The library
+        works on finite, exactly-represented antichains. For
+        relations whose Pareto front is continuous, the only support
+        is the bracket pattern of \texttt{UncertainDP}. Approximation
+        kernels (Sec.~VII of Censi 2015) are not yet implemented.
+  \item \textbf{Visualisation of the design graph}. Example~5
+        visualises the Kleene ascent over $\Nat \times \Nat$, but
+        there is no general renderer for the operator tree or for
+        the subsystem network of a \texttt{System}.
+  \item \textbf{Symbolic/automatic differentiation of $h$}. All
+        relations are evaluated numerically.
+  \item \textbf{Distributed or parallel solving}. The Kleene
+        iteration is sequential.
+\end{itemize}
+
+Contributions, particularly on these items, are welcome.
+
+% ===========================================================================
+\section{API Reference Summary}
+\label{sec:api}
+% ===========================================================================
+
+The public API exported by \texttt{import codesign} is summarised
+below.
+
+\paragraph{Posets.}
+\texttt{Reals}, \texttt{Naturals}, \texttt{NamedProduct},
+\texttt{Discrete}, abstract base \texttt{Poset}.
+
+\paragraph{Antichains.}
+\texttt{Antichain}.
+
+\paragraph{Design problems.}
+\texttt{DesignProblem} (abstract base),
+\texttt{AlgebraicDP},
+\texttt{FunctionDP},
+\texttt{CatalogDP}, \texttt{CatalogEntry},
+\texttt{ConstraintDP},
+\texttt{ODE\_DP},
+\texttt{UncertainDP}.
+
+\paragraph{Composition.}
+\texttt{Series}, \texttt{Parallel}, \texttt{Loop} (classes);
+\texttt{series}, \texttt{par}, \texttt{loop} (function aliases).
+
+\paragraph{Primitives.}
+\texttt{adder}, \texttt{multiplier}, \texttt{scale}, \texttt{constant},
+\texttt{identity}.
+
+\paragraph{Solver.}
+\texttt{solve}, \texttt{kleene\_loop}, \texttt{minimize\_cost},
+\texttt{SolveResult}.
+
+\paragraph{Builders.}
+\texttt{MCDP}, \texttt{System}.
+
+\paragraph{Class-based modules.}
+\texttt{Module} (declarative \texttt{DesignProblem} base class).
+
+\paragraph{Constraint DSL.}
+\texttt{Port}, \texttt{Expr}, \texttt{ModuleHandle} (returned by
+\texttt{System.add}), and the helper functions \texttt{sqrt},
+\texttt{exp}, \texttt{log} for use inside constraint expressions.
+
+\paragraph{Module-level.}
+\texttt{\_\_version\_\_} (the string \texttt{"0.1.0"}).
+
+% ===========================================================================
+\section*{References}
+% ===========================================================================
+\addcontentsline{toc}{section}{References}
+
+\begin{enumerate}[label={[\arabic*]},leftmargin=2em]
+  \item Andrea Censi. \emph{A Mathematical Theory of Co-Design}.
+        arXiv:1512.08055, 2015.
+        \url{https://arxiv.org/abs/1512.08055}
+  \item B.\,A. Davey and H.\,A. Priestley. \emph{Introduction to
+        Lattices and Order}. Cambridge University Press, 2nd ed.,
+        2002.
+  \item The MCDPL software distribution.
+        \url{https://co-design.science/software/}
+\end{enumerate}
+
+\end{document}

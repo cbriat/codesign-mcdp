@@ -80,57 +80,80 @@ closed form.
 designs it is more natural to define each subsystem (battery, actuator,
 chassis, sensor, ...) independently with its own F and R, then wire them
 together with named algebraic constraints. The `System` builder does exactly
-that.
+that, and the operator-overloaded syntax lets you write the wiring as
+inequalities that read like the textbook math:
 
 ```python
-from codesign import AlgebraicDP, NamedProduct, Reals, System, solve
+from codesign import Module, Reals, System, solve
 
-# 1. Define subsystems in isolation. Each has its own F and R.
-battery = AlgebraicDP(
-    F=NamedProduct({"capacity": Reals(unit="J")}),
-    R=NamedProduct({"mass": Reals(unit="kg")}),
-    equations={"mass": lambda f: f["capacity"] / 1.8e6},
-)
-actuator = AlgebraicDP(
-    F=NamedProduct({"lift_force": Reals(unit="N")}),
-    R=NamedProduct({"power": Reals(unit="W")}),
-    equations={"power": lambda f: 10.0 * f["lift_force"] ** 2},
-)
+# 1. Define subsystems as Module subclasses. F, R, and h are declared
+#    inline; the constructor wires them into a DesignProblem.
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+    def h(self, f):
+        return {"mass": f["capacity"] / 1.8e6}
 
-# 2. Assemble. Declare what the system as a whole provides and requires,
-#    add subsystems by name, and write algebraic constraints linking
-#    their ports.
+class Actuator(Module):
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+    def h(self, f):
+        return {"power": 10.0 * f["lift_force"] ** 2}
+
+# 2. Assemble. Each provides/requires/add returns a port handle; arithmetic
+#    operators on handles build expression trees, and >= registers a
+#    constraint with the system.
 sys = System("drone")
-sys.provides("endurance", unit="s")
-sys.provides("extra_payload", unit="kg")
-sys.provides("extra_power", unit="W")
-sys.requires("total_mass", unit="kg")
+endurance     = sys.provides("endurance",     unit="s")
+extra_payload = sys.provides("extra_payload", unit="kg")
+extra_power   = sys.provides("extra_power",   unit="W")
+total_mass    = sys.requires("total_mass",    unit="kg")
 
-sys.add("battery", battery)
-sys.add("actuator", actuator)
+battery  = sys.add("battery",  Battery())
+actuator = sys.add("actuator", Actuator())
 
-sys.constrain("battery.capacity",
-              lambda x: (x["actuator.power"] + x["extra_power"]) * x["endurance"])
-sys.constrain("actuator.lift_force",
-              lambda x: 9.81 * (x["battery.mass"] + x["extra_payload"]))
-sys.constrain("total_mass",
-              lambda x: x["battery.mass"] + x["extra_payload"])
+# 3. Wire it: each line is a constraint that reads like a textbook inequality.
+battery.capacity    >= (actuator.power + extra_power) * endurance
+actuator.lift_force >= 9.81 * (battery.mass + extra_payload)
+total_mass          >= battery.mass + extra_payload
 
 drone = sys.build()
 result = solve(drone, {"endurance": 300, "extra_payload": 0.5, "extra_power": 5.0})
 ```
 
-The argument `x` in each constraint is a plain dict carrying the outer
-functionalities under their bare names and every subsystem R port under its
-dotted name (`"battery.mass"`, `"actuator.power"`). The constraint `target >=
-demand(x)` is the MCDP analogue of MCDPL's `>=` operator. Multiple constraints
-on the same target are joined (max).
-
-Under the hood, `build()` produces a single `Loop` whose axis bundles every
-subsystem's R; the Kleene iteration converges over all of them
+Each `>=` constraint compiles to the same internal callable as the legacy
+lambda form. Under the hood, `build()` produces a single `Loop` whose axis
+bundles every subsystem's R; the Kleene iteration converges over all of them
 simultaneously, and the resulting DP is no different from one written in
 operator form. Systems can themselves be added as subsystems of other
 Systems (recursive composition).
+
+### Operator-overloaded constraint syntax: the rules
+
+`sys.provides`, `sys.requires`, and `sys.add` each return a port handle:
+
+- `provides(name)` returns an **outer F** port (right-hand side only).
+- `requires(name)` returns an **outer R** port (can be a constraint target).
+- `add(module_name, dp)` returns a `ModuleHandle`. Attribute access on the
+  handle (`battery.capacity`) yields a port: F ports can be constraint
+  targets, R ports can appear in expressions.
+
+The DSL refuses category mistakes at the line where they happen: putting an
+F port on the right of an expression, or constraining an R port externally,
+raises immediately with an explanatory message.
+
+For complex demands that don't fit algebraic expressions, the legacy lambda
+form remains available and can be mixed freely with the operator form:
+
+```python
+# Equivalent to: battery.capacity >= (actuator.power + extra_power) * endurance
+sys.constrain("battery.capacity",
+              lambda x: (x["actuator.power"] + x["extra_power"]) * x["endurance"])
+```
+
+Both styles produce identical results.
+
+### Multi-valued antichains
 
 When a subsystem returns a multi-valued antichain, for example a `CatalogDP`
 with Pareto-incomparable motors, the System takes the Cartesian product
@@ -143,6 +166,12 @@ Medium load: payload=10 kg, mission_energy=1 MJ
       total_mass=22.49 kg,  total_cost=$475.00   (heavier, cheaper motor)
       total_mass=20.41 kg,  total_cost=$969.00   (lighter, more expensive motor)
 ```
+
+See `examples/09_robotic_arm.py` for a five-module composition that uses
+both the operator syntax and parameterised Module subclasses to express
+mechanical and electrical couplings that don't fit a clean series/parallel
+pattern.
+
 
 ## Primitive DP types
 
@@ -185,11 +214,24 @@ payload), the iteration drives the loop variable to ⊤ and the result reports
 * `04_uncertain_and_ode.py` – `UncertainDP` brackets and `ODE_DP` steady states.
 * `05_visualize_kleene.py` – plots the Kleene ascent `S_0, S_1, ...` (reproduces the structure of Fig. 36).
 * `06_drone_mcdpl_syntax.py` – drone rebuilt with the MCDPL-style declarative builder.
-* `07_drone_modular.py` – the same drone again with `System`, where battery and actuator are independent modules.
-* `08_vehicle_modular.py` – motor catalog + chassis + battery wired with `System`, producing a multi-point Pareto front.
+* `07_drone_modular.py` – the same drone with `System`, written with `Module` classes and the operator-overloaded `>=` constraint syntax.
+* `08_vehicle_modular.py` – motor catalog + chassis + battery wired with the operator syntax, producing a multi-point Pareto front.
+* `09_robotic_arm.py` – five subsystems (two joints, sensor, controller, battery) with non-trivial cyclic couplings, demonstrating where the operator syntax really pays off.
 
 Run any of them with `python -m examples.NN_name`. The visualization example
 also needs matplotlib (`pip install matplotlib`).
+
+## Documentation
+
+A full reference manual is provided as both LaTeX source and a pre-built PDF
+under [`docs/manual/`](docs/manual/). It covers the mathematical background
+from Censi (2015), every data type and primitive, both builders, the solver,
+worked examples, and modelling guidelines. Rebuild from source with
+`make` in that directory if you have LaTeX installed.
+
+The notebook companion to each example is under
+[`notebooks/`](notebooks/README.md), with outputs and figures pre-rendered so
+they read directly on GitHub.
 
 ## Notebooks
 

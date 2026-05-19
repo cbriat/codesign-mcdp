@@ -1,58 +1,54 @@
 """
-Modular drone: the same MCDP as ``examples/01_drone.py``, but assembled from
-two independent subsystems (Battery and Actuator) plus connection
-constraints, rather than one monolithic FunctionDP.
+Modular drone, MCDPL-style.
 
-The battery and actuator are defined completely independently. They have
-their own functionality (capacity, lift_force) and resources (mass, power).
-The System ties them together with three constraints:
+The same MCDP as ``examples/01_drone.py``, expressed with the new
+operator-overloaded constraint syntax. Battery and actuator are defined
+as ``Module`` subclasses with class-level F/R declarations, and the
+``System`` is wired together with ``>=`` constraints that read like the
+mathematical inequalities they represent.
 
-    battery.capacity   >= (actuator.power + extra_power) * endurance
-    actuator.lift_force >= 9.81 * (battery.mass + extra_payload)
-    total_mass         >= battery.mass + extra_payload
-
-The first two have a feedback loop: actuator.power depends on battery.mass
-and vice versa. The System builder closes the loop automatically over the
-bundle of all subsystem R ports.
+Equivalent to the lambda-based ``sys.constrain(target, lambda x: ...)``
+form. Both styles compile to the same internal constraint list and
+produce identical results.
 """
 from __future__ import annotations
 
-from codesign import (
-    AlgebraicDP,
-    NamedProduct,
-    Reals,
-    System,
-    solve,
-)
+from codesign import Module, Reals, System, solve
 
 
 # ---------------------------------------------------------------------------
-# Subsystems: each defined independently, in isolation.
+# Subsystems: declarative class definitions.
 # ---------------------------------------------------------------------------
 
 
-def make_battery(specific_energy_jpkg: float = 1.8e6) -> AlgebraicDP:
-    """A battery: capacity in -> mass out, via specific energy."""
-    return AlgebraicDP(
-        F=NamedProduct({"capacity": Reals(unit="J")}),
-        R=NamedProduct({"mass": Reals(unit="kg")}),
-        equations={"mass": lambda f: f["capacity"] / specific_energy_jpkg},
-        name="battery",
-    )
+class Battery(Module):
+    """Sizes a battery's mass from its required capacity (via specific energy)."""
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+
+    def __init__(self, specific_energy: float = 1.8e6):
+        self.specific_energy = specific_energy
+        super().__init__()
+
+    def h(self, f):
+        return {"mass": f["capacity"] / self.specific_energy}
 
 
-def make_actuator(c_lift: float = 10.0) -> AlgebraicDP:
-    """A simple aerodynamic actuator: power scales as the square of lift."""
-    return AlgebraicDP(
-        F=NamedProduct({"lift_force": Reals(unit="N")}),
-        R=NamedProduct({"power": Reals(unit="W")}),
-        equations={"power": lambda f: c_lift * f["lift_force"] ** 2},
-        name="actuator",
-    )
+class Actuator(Module):
+    """A simple aerodynamic actuator: power scales as lift squared."""
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+
+    def __init__(self, c_lift: float = 10.0):
+        self.c_lift = c_lift
+        super().__init__()
+
+    def h(self, f):
+        return {"power": self.c_lift * f["lift_force"] ** 2}
 
 
 # ---------------------------------------------------------------------------
-# System: wire the subsystems together.
+# System assembly.
 # ---------------------------------------------------------------------------
 
 
@@ -61,29 +57,25 @@ def make_drone() -> System:
 
     sys = System("drone")
 
-    # Outer interface.
-    sys.provides("endurance", unit="s")
-    sys.provides("extra_payload", unit="kg")
-    sys.provides("extra_power", unit="W")
-    sys.requires("total_mass", unit="kg")
+    # Outer interface: capture each declaration as a Port handle for use in
+    # expressions.
+    endurance     = sys.provides("endurance",     unit="s")
+    extra_payload = sys.provides("extra_payload", unit="kg")
+    extra_power   = sys.provides("extra_power",   unit="W")
+    total_mass    = sys.requires("total_mass",    unit="kg")
 
-    # Subsystems.
-    sys.add("battery", make_battery())
-    sys.add("actuator", make_actuator())
+    # Subsystems: capture each as a ModuleHandle so its ports are accessible
+    # via attribute lookup.
+    battery  = sys.add("battery",  Battery())
+    actuator = sys.add("actuator", Actuator())
 
-    # Connection constraints.
-    sys.constrain(
-        "battery.capacity",
-        lambda x: (x["actuator.power"] + x["extra_power"]) * x["endurance"],
-    )
-    sys.constrain(
-        "actuator.lift_force",
-        lambda x: G * (x["battery.mass"] + x["extra_payload"]),
-    )
-    sys.constrain(
-        "total_mass",
-        lambda x: x["battery.mass"] + x["extra_payload"],
-    )
+    # Connection constraints: each line reads like an inequality from a
+    # textbook. The LHS is the F port (or outer R) being constrained; the
+    # RHS is an algebraic expression involving outer F values and module R
+    # ports.
+    battery.capacity    >= (actuator.power + extra_power) * endurance
+    actuator.lift_force >= G * (battery.mass + extra_payload)
+    total_mass          >= battery.mass + extra_payload
 
     return sys
 

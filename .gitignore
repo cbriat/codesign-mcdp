@@ -52,6 +52,15 @@ ENV/
 # Jupyter
 .ipynb_checkpoints/
 
+# LaTeX build artifacts
+*.aux
+*.log
+*.toc
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
 # Generated outputs from the examples
 /outputs/
 *.png

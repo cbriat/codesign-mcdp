@@ -568,60 +568,66 @@ For *modular* composition with named subsystems, the `System` builder in noteboo
 # ---------------------------------------------------------------------------
 
 NB_07 = [
-    ("md", """# 07. The drone, modular: independent battery and actuator
+    ("md", """# 07. The drone, modular: MCDPL-style operator syntax
 
-The same MCDP as notebooks **01** and **06**, but with battery and actuator defined **independently** as their own design problems, then assembled with the `System` builder.
+The same MCDP as notebooks **01** and **06**, but with battery and actuator defined as **independent** subsystems and assembled with the `System` builder. This notebook uses the new operator-overloaded constraint syntax: each connection is written as a Python `>=` between port handles, mirroring how the same model would appear in the MCDPL source from the paper.
 
-This is the natural way to build larger designs: each subsystem is its own DP with its own F and R, and the `System` wires them together with named algebraic constraints. The Kleene iteration converges over the joint state of all subsystem R ports.
+This is the recommended style for modular design. Each subsystem is a `Module` subclass with its own `F`, `R`, and `h`. The wiring at the bottom reads as a column of inequalities, the way a textbook would.
 """),
     ("md", "## Imports"),
-    ("code", """from codesign import (
-    AlgebraicDP, NamedProduct, Reals, System, solve,
-)"""),
-    ("md", """## Subsystems
+    ("code", "from codesign import Module, Reals, System, solve"),
+    ("md", """## Subsystems as class-based Modules
 
-Each is defined in isolation. The battery has no idea the actuator exists, and vice versa.
+Each is a self-contained design problem. The constructor accepts parameters so a single class can be reused with different physical constants.
 """),
-    ("code", """battery = AlgebraicDP(
-    F=NamedProduct({"capacity": Reals(unit="J")}),
-    R=NamedProduct({"mass": Reals(unit="kg")}),
-    equations={"mass": lambda f: f["capacity"] / 1.8e6},
-    name="battery",
-)
-actuator = AlgebraicDP(
-    F=NamedProduct({"lift_force": Reals(unit="N")}),
-    R=NamedProduct({"power": Reals(unit="W")}),
-    equations={"power": lambda f: 10.0 * f["lift_force"] ** 2},
-    name="actuator",
-)
-battery, actuator"""),
-    ("md", """## Assembly
+    ("code", """class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
 
-Declare the outer interface, add the subsystems, then attach connection constraints. Each constraint reads `target_port >= demand(ctx)` where `ctx` is a dict carrying the outer functionalities (`endurance`, `extra_payload`, `extra_power`) under their bare names and every subsystem R port under its dotted name (`battery.mass`, `actuator.power`).
+    def __init__(self, specific_energy=1.8e6):
+        self.specific_energy = specific_energy
+        super().__init__()
+
+    def h(self, f):
+        return {"mass": f["capacity"] / self.specific_energy}
+
+
+class Actuator(Module):
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+
+    def __init__(self, c_lift=10.0):
+        self.c_lift = c_lift
+        super().__init__()
+
+    def h(self, f):
+        return {"power": self.c_lift * f["lift_force"] ** 2}
+
+
+Battery(), Actuator()"""),
+    ("md", """## Assembly via operator-overloaded constraints
+
+`sys.provides`, `sys.requires`, and `sys.add` each return a port handle. Arithmetic operators on handles build expression trees lazily; the `>=` operator registers a constraint with the parent system.
 """),
     ("code", """G = 9.81
 
 sys = System("drone")
-sys.provides("endurance", unit="s")
-sys.provides("extra_payload", unit="kg")
-sys.provides("extra_power", unit="W")
-sys.requires("total_mass", unit="kg")
 
-sys.add("battery", battery)
-sys.add("actuator", actuator)
+# Outer interface: each call returns a Port handle.
+endurance     = sys.provides("endurance",     unit="s")
+extra_payload = sys.provides("extra_payload", unit="kg")
+extra_power   = sys.provides("extra_power",   unit="W")
+total_mass    = sys.requires("total_mass",    unit="kg")
 
-sys.constrain(
-    "battery.capacity",
-    lambda x: (x["actuator.power"] + x["extra_power"]) * x["endurance"],
-)
-sys.constrain(
-    "actuator.lift_force",
-    lambda x: G * (x["battery.mass"] + x["extra_payload"]),
-)
-sys.constrain(
-    "total_mass",
-    lambda x: x["battery.mass"] + x["extra_payload"],
-)
+# Subsystems: each call returns a ModuleHandle whose attributes are ports.
+battery  = sys.add("battery",  Battery())
+actuator = sys.add("actuator", Actuator())
+
+# Connection constraints. Read like a textbook page of inequalities.
+battery.capacity    >= (actuator.power + extra_power) * endurance
+actuator.lift_force >= G * (battery.mass + extra_payload)
+total_mass          >= battery.mass + extra_payload
+
 print(sys)"""),
     ("md", "## Build and solve"),
     ("code", """drone = sys.build()
@@ -641,9 +647,24 @@ for label, f in cases:
           f"feasible={result.feasible}  {result.antichain}")"""),
     ("md", """## What changed compared to notebook 01
 
-The values are identical (e.g. for Medium, modest: `total_mass = 0.5492 kg = 0.04921 (battery) + 0.5 (payload)`). The iteration count is roughly 2x larger, because the loop now updates `battery.mass` and `actuator.power` in alternation rather than in one coupled step. Same fixed point, finer-grained updates.
+The values are identical (for Medium, modest: `total_mass = 0.5492 kg = 0.04921 (battery) + 0.5 (payload)`). The Kleene loop now updates each subsystem's R ports in alternation, so the iteration count is somewhat larger than the monolithic version. The fixed point is the same.
 
-The payoff is *modularity*: the battery and actuator are reusable building blocks. The next notebook (**08**) adds a third subsystem (a motor catalog with discrete choices) and produces a multi-point Pareto front from the same machinery.
+The payoff is **clarity and modularity**: `Battery` and `Actuator` are reusable building blocks, the constraints between them read as math rather than dict lookups, and adding a third subsystem (notebook **08**) or building a heterogeneous network (notebook **09**) requires no extra machinery.
+
+### The same example in the lambda-based legacy syntax
+
+For comparison, here is what the constraint block looked like before:
+
+```python
+sys.constrain("battery.capacity",
+              lambda x: (x["actuator.power"] + x["extra_power"]) * x["endurance"])
+sys.constrain("actuator.lift_force",
+              lambda x: G * (x["battery.mass"] + x["extra_payload"]))
+sys.constrain("total_mass",
+              lambda x: x["battery.mass"] + x["extra_payload"])
+```
+
+Both forms still work and compile to the same internal constraint list. The operator form is what we recommend for new code.
 """),
 ]
 
@@ -655,24 +676,26 @@ The payoff is *modularity*: the battery and actuator are reusable building block
 NB_08 = [
     ("md", """# 08. Motor + chassis + battery: a multi-point Pareto front
 
-A small electric vehicle is co-designed from three independent subsystems:
+A small electric vehicle is co-designed from three subsystems:
 
-- a **motor** picked from a discrete catalog (each entry has its own (torque, mass, cost) tuple),
-- a **chassis** whose mass and cost scale with the load it must carry,
+- a **motor** picked from a discrete catalog (each entry has its own `(torque, mass, cost)` tuple),
+- a **chassis** whose mass and cost scale with the load it supports,
 - a **battery** sized to the mission energy.
 
-The three subsystems are coupled cyclically: the chassis must support the motor and battery, the motor's torque is sized by the total moving mass (which includes the chassis), and so on. The `System` builder closes the loop.
+The subsystems are coupled cyclically: the chassis must support the motor and battery, the motor's torque is sized by the total moving mass (which includes the chassis), and so on. The `System` builder closes the loop.
 
-Because the motor catalog has Pareto-incomparable entries (lighter and more expensive, or heavier and cheaper), the system-level Pareto front has multiple points: real engineering tradeoffs surfaced automatically.
+Because the motor catalog has Pareto-incomparable entries, the system-level Pareto front has multiple points: real engineering tradeoffs surface automatically.
+
+This notebook also uses the operator-overloaded constraint syntax introduced in notebook 07.
 """),
     ("md", "## Imports"),
     ("code", """from codesign import (
-    AlgebraicDP, CatalogDP, CatalogEntry, NamedProduct, Reals,
+    CatalogDP, CatalogEntry, Module, NamedProduct, Reals,
     System, minimize_cost, solve,
 )"""),
     ("md", """## Subsystem 1: a motor catalog
 
-Each entry says "this motor can deliver up to X torque, and costs Y mass and Z dollars." Several entries are mutually incomparable on (mass, cost).
+The catalog has Pareto-incomparable entries (lighter and more expensive vs. heavier and cheaper). `CatalogDP` is kept as a plain function constructor: multi-valued antichains don't fit the `Module` declarative pattern as cleanly.
 """),
     ("code", """motor = CatalogDP(
     F=NamedProduct({"torque": Reals(unit="N*m")}),
@@ -689,55 +712,51 @@ Each entry says "this motor can deliver up to X torque, and costs Y mass and Z d
     name="motor",
 )
 motor"""),
-    ("md", "## Subsystem 2: the chassis"),
-    ("code", """chassis = AlgebraicDP(
-    F=NamedProduct({"load": Reals(unit="kg")}),
-    R=NamedProduct({"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}),
-    equations={
-        "mass": lambda f: 0.6 * f["load"],
-        "cost": lambda f: 20.0 * f["load"],
-    },
-    name="chassis",
-)"""),
-    ("md", "## Subsystem 3: the battery"),
-    ("code", """battery = AlgebraicDP(
-    F=NamedProduct({"energy": Reals(unit="J")}),
-    R=NamedProduct({"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}),
-    equations={
-        "mass": lambda f: f["energy"] / 1.8e6,
-        "cost": lambda f: 0.05 * f["energy"] / 3.6e3,  # $0.05 / Wh
-    },
-    name="battery",
-)"""),
-    ("md", """## Wire it up
+    ("md", "## Subsystems 2 and 3: chassis and battery as Module classes"),
+    ("code", """class Chassis(Module):
+    F = {"load": Reals(unit="kg")}
+    R = {"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}
 
-The chassis must support payload + motor + battery, the motor's torque demand depends on the total moving mass, and the battery's energy demand is the externally-supplied mission energy. The total mass and total cost aggregate up from all subsystems.
+    def h(self, f):
+        return {
+            "mass": 0.6  * f["load"],
+            "cost": 20.0 * f["load"],
+        }
+
+
+class Battery(Module):
+    F = {"energy": Reals(unit="J")}
+    R = {"mass":   Reals(unit="kg"), "cost": Reals(unit="USD")}
+
+    def h(self, f):
+        return {
+            "mass": f["energy"] / 1.8e6,
+            "cost": 0.05 * f["energy"] / 3.6e3,  # $0.05 per Wh
+        }"""),
+    ("md", """## Wire it up with `>=`
+
+The chassis must support payload plus motor plus battery; the motor's torque demand depends on the total moving mass; the battery's energy demand is set externally. Total mass and total cost aggregate from every subsystem.
 """),
     ("code", """G = 9.81
 TORQUE_PER_KG = 0.25
 
 sys = System("vehicle")
-sys.provides("payload", unit="kg")
-sys.provides("mission_energy", unit="J")
-sys.requires("total_mass", unit="kg")
-sys.requires("total_cost", unit="USD")
 
-sys.add("motor", motor)
-sys.add("chassis", chassis)
-sys.add("battery", battery)
+payload        = sys.provides("payload",        unit="kg")
+mission_energy = sys.provides("mission_energy", unit="J")
+total_mass     = sys.requires("total_mass",     unit="kg")
+total_cost     = sys.requires("total_cost",     unit="USD")
 
-sys.constrain("chassis.load",
-              lambda x: x["payload"] + x["motor.mass"] + x["battery.mass"])
-sys.constrain("motor.torque",
-              lambda x: TORQUE_PER_KG * G * (
-                  x["payload"] + x["chassis.mass"] + x["battery.mass"]))
-sys.constrain("battery.energy",
-              lambda x: x["mission_energy"])
-sys.constrain("total_mass",
-              lambda x: x["payload"] + x["motor.mass"]
-                        + x["chassis.mass"] + x["battery.mass"])
-sys.constrain("total_cost",
-              lambda x: x["motor.cost"] + x["chassis.cost"] + x["battery.cost"])
+m = sys.add("motor",   motor)
+c = sys.add("chassis", Chassis())
+b = sys.add("battery", Battery())
+
+c.load   >= payload + m.mass + b.mass
+m.torque >= TORQUE_PER_KG * G * (payload + c.mass + b.mass)
+b.energy >= mission_energy
+
+total_mass >= payload + m.mass + c.mass + b.mass
+total_cost >= m.cost + c.cost + b.cost
 
 vehicle = sys.build()
 print(sys)"""),
@@ -776,6 +795,175 @@ This is the payoff of modularity: each subsystem has a clean local definition, a
 
 
 # ---------------------------------------------------------------------------
+# 09 A robotic arm: non-trivial connection topology
+# ---------------------------------------------------------------------------
+
+NB_09 = [
+    ("md", """# 09. A robotic arm: non-trivial connection topology
+
+This notebook exercises the operator-overloaded syntax on a problem where the connections don't follow a clean series / parallel / loop pattern. The arm has:
+
+- two **joint** actuators (shoulder and elbow), each with their own torque and power characteristics,
+- a **controller** driving both joints and ingesting sensor data,
+- a **sensor** measuring arm position,
+- a **battery** sized by total mission energy.
+
+The connection graph is genuinely non-trivial: the controller's power demand depends on both incoming sensor data and outgoing commands, both joints share the same battery via a power bus, and the shoulder torque has to support the elbow's own mass at the end of the shoulder arm. The Kleene iteration resolves the resulting cycles automatically.
+
+The point of this notebook is that the resulting code reads as a paragraph of physical relationships, not a sequence of dict-juggling lambdas.
+"""),
+    ("md", "## Imports"),
+    ("code", "from codesign import Module, Reals, System, solve"),
+    ("md", """## Joint, sensor, controller, battery
+
+Each subsystem is a small `Module`. The `Joint` class is reused for both shoulder and elbow with different `motor_density` parameters.
+"""),
+    ("code", """G = 9.81
+
+
+class Joint(Module):
+    F = {"torque": Reals(unit="N*m"), "speed": Reals(unit="rad/s")}
+    R = {"mass":   Reals(unit="kg"),  "electric_power": Reals(unit="W")}
+
+    def __init__(self, motor_density=0.20, efficiency=0.85):
+        self.motor_density = motor_density
+        self.efficiency = efficiency
+        super().__init__()
+
+    def h(self, f):
+        return {
+            "mass":           self.motor_density * f["torque"],
+            "electric_power": f["torque"] * f["speed"] / self.efficiency,
+        }
+
+
+class Sensor(Module):
+    F = {"sample_rate": Reals(unit="Hz")}
+    R = {"power": Reals(unit="W"), "mass": Reals(unit="kg")}
+
+    def h(self, f):
+        return {"power": 0.02 * f["sample_rate"] + 0.5, "mass": 0.05}
+
+
+class Controller(Module):
+    F = {"input_rate": Reals(unit="Hz"), "command_rate": Reals(unit="Hz")}
+    R = {"power":      Reals(unit="W"),  "mass":         Reals(unit="kg")}
+
+    def h(self, f):
+        return {
+            "power": 0.05 * (f["input_rate"] + f["command_rate"]) + 2.0,
+            "mass":  0.15,
+        }
+
+
+class Battery(Module):
+    F = {"energy": Reals(unit="J")}
+    R = {"mass":   Reals(unit="kg")}
+
+    def __init__(self, specific_energy=1.8e6):
+        self.specific_energy = specific_energy
+        super().__init__()
+
+    def h(self, f):
+        return {"mass": f["energy"] / self.specific_energy}"""),
+    ("md", """## Wire everything together
+
+Seven mission parameters drive the system; one resource (total mass) comes out. The eight constraint lines below capture the entire interconnection.
+"""),
+    ("code", """sys = System("robotic_arm")
+
+# Mission parameters.
+payload_mass    = sys.provides("payload_mass",    unit="kg")
+operating_time  = sys.provides("operating_time",  unit="s")
+elbow_speed     = sys.provides("elbow_speed",     unit="rad/s")
+shoulder_speed  = sys.provides("shoulder_speed",  unit="rad/s")
+control_rate    = sys.provides("control_rate",   unit="Hz")
+elbow_arm       = sys.provides("elbow_arm",      unit="m")
+shoulder_arm    = sys.provides("shoulder_arm",   unit="m")
+
+total_mass = sys.requires("total_mass", unit="kg")
+
+elbow      = sys.add("elbow",      Joint())
+shoulder   = sys.add("shoulder",   Joint(motor_density=0.25))
+sensor     = sys.add("sensor",     Sensor())
+controller = sys.add("controller", Controller())
+battery    = sys.add("battery",    Battery())
+
+# Mechanical chain: the elbow lifts only the payload at its arm length,
+# the shoulder lifts the payload plus the elbow joint itself at its
+# longer arm.
+elbow.torque    >= G * payload_mass * elbow_arm
+elbow.speed     >= elbow_speed
+shoulder.torque >= G * (payload_mass + elbow.mass) * shoulder_arm
+shoulder.speed  >= shoulder_speed
+
+# Electronics: sensor must Nyquist the control loop; controller must
+# keep up with both incoming samples and outgoing commands.
+sensor.sample_rate      >= 2.0 * control_rate
+controller.input_rate   >= 2.0 * control_rate
+controller.command_rate >= control_rate
+
+# Energy budget: battery sized by integrated power over the mission.
+battery.energy >= operating_time * (
+    elbow.electric_power + shoulder.electric_power
+    + controller.power + sensor.power
+)
+
+# Aggregate mass.
+total_mass >= (
+    payload_mass
+    + elbow.mass + shoulder.mass
+    + sensor.mass + controller.mass
+    + battery.mass
+)
+
+print(sys)"""),
+    ("md", "## Build and solve"),
+    ("code", """arm = sys.build()
+
+cases = [
+    ("Pick-and-place light", dict(
+        payload_mass=0.5, operating_time=300.0,
+        elbow_speed=2.0, shoulder_speed=1.5,
+        control_rate=100.0,
+        elbow_arm=0.3, shoulder_arm=0.5,
+    )),
+    ("Heavier payload", dict(
+        payload_mass=2.0, operating_time=600.0,
+        elbow_speed=1.5, shoulder_speed=1.0,
+        control_rate=200.0,
+        elbow_arm=0.3, shoulder_arm=0.5,
+    )),
+    ("Long-reach precise", dict(
+        payload_mass=1.0, operating_time=900.0,
+        elbow_speed=1.0, shoulder_speed=0.8,
+        control_rate=500.0,
+        elbow_arm=0.6, shoulder_arm=0.9,
+    )),
+]
+for label, f in cases:
+    result = solve(arm, f, max_iter=300)
+    print(f"{label}:")
+    print(f"   iters={result.iterations}, feasible={result.feasible}")
+    if result.feasible:
+        for p in result.antichain.points:
+            print(f"   total_mass = {p['total_mass']:.2f} kg")
+    print()"""),
+    ("md", """## What the DSL bought us
+
+The eight constraint lines above each express a single physical relationship. In the lambda-based form, the same model would have grown to roughly twenty-five lines of `lambda x: x["something.something"] + ...` boilerplate, with every port name as a string. The operator-overloaded version:
+
+- catches typos: `elbow.toruqe` becomes an `AttributeError` on the line where the typo happens, not deep inside `build()`,
+- catches semantic mistakes: trying to put a module F port (e.g. `sensor.sample_rate`) on the RHS of an expression raises immediately, with a message explaining the rule,
+- prints constraints as readable inequalities in `print(sys)`,
+- composes through expression trees so refactoring is just arithmetic.
+
+The cyclic dependencies (shoulder torque depending on elbow mass; battery energy depending on both joints' powers, which depend on their torques, which depend on the elbow mass which depends on the payload) are resolved transparently by the Kleene iteration: four iterations for all three test cases.
+"""),
+]
+
+
+# ---------------------------------------------------------------------------
 # Build all notebooks
 # ---------------------------------------------------------------------------
 
@@ -790,6 +978,7 @@ def main():
         ("06_drone_mcdpl_syntax.ipynb", NB_06),
         ("07_drone_modular.ipynb", NB_07),
         ("08_vehicle_modular.ipynb", NB_08),
+        ("09_robotic_arm.ipynb", NB_09),
     ]
     for name, cells in plan:
         write(name, cells)
