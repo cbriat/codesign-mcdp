@@ -34,9 +34,21 @@ from .mcdpl import MCDP
 from .module import Module
 from .posets import Discrete, NamedProduct, Naturals, Poset, Reals
 from .primitives import adder, constant, identity, multiplier, scale
-from .solver import SolveResult, kleene_loop, minimize_cost, solve
+from .solver import SolveResult, TraceEntry, kleene_loop, minimize_cost, solve
 from .sugar import Expr, ModuleHandle, Port, exp, log, sqrt
 from .system import System
+from .uncertainty import (
+    Box,
+    Circle,
+    Disk,
+    Ellipsoid,
+    GaussianCopula,
+    Independence,
+    Stochastic,
+    UncertaintyResult,
+    UncertaintySet,
+    solve_with_uncertainty,
+)
 
 __all__ = [
     "Reals", "Naturals", "Discrete", "NamedProduct", "Poset",
@@ -45,7 +57,10 @@ __all__ = [
     "ConstraintDP", "ODE_DP", "UncertainDP",
     "Series", "Parallel", "Loop", "series", "par", "loop",
     "adder", "multiplier", "scale", "constant", "identity",
-    "solve", "minimize_cost", "kleene_loop", "SolveResult",
+    "solve", "minimize_cost", "kleene_loop", "SolveResult", "TraceEntry",
     "MCDP", "System", "Module",
     "Expr", "ModuleHandle", "Port", "sqrt", "exp", "log",
+    "Box", "Disk", "Circle", "Ellipsoid",
+    "Stochastic", "GaussianCopula", "Independence",
+    "UncertaintySet", "UncertaintyResult", "solve_with_uncertainty",
 ]

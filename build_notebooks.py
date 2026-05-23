@@ -201,7 +201,8 @@ def run(c_value, show_trace=True):
     result = solve(looped, {"c": c_value}, max_iter=50, record_trace=show_trace)
     print(f"c = {c_value}: iters = {result.iterations}, feasible = {result.feasible}")
     if show_trace and result.trace:
-        for k, A in enumerate(result.trace):
+        for k, entry in enumerate(result.trace):
+            A = entry.antichain
             pts = ", ".join(f"({p['xy']['x']}, {p['xy']['y']})" for p in A.points)
             print(f"   S_{k}: {{ {pts} }}")
     pts = ", ".join(pretty(p) for p in result.antichain.points)
@@ -449,8 +450,8 @@ from codesign import (
     trace = result.trace
 
     max_xy = 1
-    for A in trace:
-        for p in A.points:
+    for entry in trace:
+        for p in entry.antichain.points:
             x, y = p["xy"]["x"], p["xy"]["y"]
             if x != math.inf: max_xy = max(max_xy, int(x))
             if y != math.inf: max_xy = max(max_xy, int(y))
@@ -462,7 +463,8 @@ from codesign import (
     axes = [axes] if rows * cols == 1 else (axes.flat if rows > 1 else axes)
     axes = list(axes)
 
-    for k, A in enumerate(trace):
+    for k, entry in enumerate(trace):
+        A = entry.antichain
         ax = axes[k]
         xs, ys = [], []
         for p in A.points:
@@ -964,6 +966,339 @@ The cyclic dependencies (shoulder torque depending on elbow mass; battery energy
 
 
 # ---------------------------------------------------------------------------
+# 10 Solver observability: trace, verbose, callback, status
+# ---------------------------------------------------------------------------
+
+NB_10 = [
+    ("md", """# 10. Watching the solver work
+
+The solver supports three observability features that turn it from a black box into a debugging tool. This notebook exercises each in turn.
+
+- `verbose=0|1|2` controls live printing: silent, end-of-solve summary, or per-iteration progress feed.
+- `trace=True` collects a structured `TraceEntry` per iteration on `result.trace`. Useful for plotting convergence behaviour or writing regression tests on iteration counts.
+- `on_iteration=callable` is invoked with each `TraceEntry` as it is produced, useful for live plotting or custom logging.
+
+And the `result.status` field (`"converged"`, `"max_iter"`, `"diverged"`) distinguishes the solver's termination reason from `result.feasible` (which is about the answer, not the iteration).
+"""),
+    ("md", "## A small drone for testing"),
+    ("code", """from codesign import Module, Reals, System, solve
+
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+    def h(self, f):
+        return {"mass": f["capacity"] / 1.8e6}
+
+class Actuator(Module):
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+    def h(self, f):
+        return {"power": 10.0 * f["lift_force"] ** 2}
+
+sys = System("drone")
+endurance     = sys.provides("endurance",     unit="s")
+extra_payload = sys.provides("extra_payload", unit="kg")
+extra_power   = sys.provides("extra_power",   unit="W")
+total_mass    = sys.requires("total_mass",    unit="kg")
+b = sys.add("battery",  Battery())
+a = sys.add("actuator", Actuator())
+b.capacity    >= (a.power + extra_power) * endurance
+a.lift_force  >= 9.81 * (b.mass + extra_payload)
+total_mass    >= b.mass + extra_payload
+drone = sys.build()
+f = {"endurance": 300.0, "extra_payload": 0.5, "extra_power": 5.0}"""),
+    ("md", "## verbose=1: a one-line summary"),
+    ("code", "_ = solve(drone, f, verbose=1)"),
+    ("md", "## verbose=2: a per-iteration feed"),
+    ("code", "_ = solve(drone, f, verbose=2, max_iter=10)"),
+    ("md", """## trace=True: collect the iterations as data
+
+The trace is a list of `TraceEntry` objects, one per iteration (plus the seed at iteration 0). Each carries the antichain at that step, the number of points, the convergence delta (max absolute change in any port value), and the wall time spent on that step alone.
+"""),
+    ("code", """r = solve(drone, f, trace=True, max_iter=200)
+print(f"status={r.status}, iters={r.iterations}, feasible={r.feasible}")
+print(f"trace has {len(r.trace)} entries (iteration 0 = seed, then 1..N)")
+print(f"first 5 deltas: {[e.delta for e in r.trace[:5]]}")
+print(f"final delta: {r.trace[-1].delta}")"""),
+    ("md", """## Plotting the convergence
+
+With matplotlib we can visualise how the delta decays. For this drone the deltas oscillate between two coupled axes (battery mass and actuator power) and decay to roughly machine precision.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+import numpy as np
+
+iters = [e.iteration for e in r.trace if e.delta is not None]
+deltas = [e.delta for e in r.trace if e.delta is not None]
+
+fig, ax = plt.subplots(figsize=(7, 4))
+# Replace zeros with a small floor for log scale
+floor = 1e-18
+deltas_plot = [max(d, floor) for d in deltas]
+ax.semilogy(iters, deltas_plot, marker="o", markersize=4)
+ax.set_xlabel("Kleene iteration")
+ax.set_ylabel("delta (max |change|)")
+ax.set_title("Convergence of the drone fixed point")
+ax.grid(True, which="both", alpha=0.3)
+plt.tight_layout()
+plt.show()"""),
+    ("md", """## on_iteration: a custom callback
+
+The callback receives each `TraceEntry` as it is produced. The drone here is small, so we print every 5th iteration to keep things tidy. In a real GUI or notebook plotter you'd update a live figure instead.
+"""),
+    ("code", """def my_logger(entry):
+    if entry.iteration % 5 == 0:
+        d = "    -    " if entry.delta is None else f"{entry.delta:.3e}"
+        print(f"   iter {entry.iteration:>3}: |A|={entry.n_points}, delta={d}")
+
+_ = solve(drone, f, on_iteration=my_logger, max_iter=100)"""),
+    ("md", """## status vs feasible
+
+The `status` field describes the solver's termination reason. The `feasible` field describes the answer. They are orthogonal: a solve can terminate cleanly on an infeasible problem, and a max-iter cut might leave a still-converging-but-feasible run looking suspect.
+"""),
+    ("code", """# A run cut short:
+r_short = solve(drone, f, max_iter=3)
+print(f"max_iter=3:  status={r_short.status!r}, feasible={r_short.feasible}, iters={r_short.iterations}")
+
+# A clean converged run:
+r_ok = solve(drone, f, max_iter=200)
+print(f"max_iter=200: status={r_ok.status!r}, feasible={r_ok.feasible}, iters={r_ok.iterations}")
+
+# A genuinely infeasible run (too long an endurance for the battery):
+r_inf = solve(drone, {"endurance": 1800.0, "extra_payload": 1.0, "extra_power": 10.0}, max_iter=200)
+print(f"infeasible:  status={r_inf.status!r}, feasible={r_inf.feasible}, iters={r_inf.iterations}")"""),
+    ("md", """The third case is interesting: the solver detects numerical divergence (some port value crossing the divergence cap of 1e30) and stops with `status='diverged'`, which is more informative than just `feasible=False`. With only the feasible flag you couldn't tell whether bumping `max_iter` would help.
+"""),
+]
+
+
+# ---------------------------------------------------------------------------
+# 11 Set-based deterministic uncertainty
+# ---------------------------------------------------------------------------
+
+NB_11 = [
+    ("md", """# 11. Set-based deterministic uncertainty
+
+The drone from notebook 07 is extended so the battery has two internal parameters (specific energy, efficiency) that are known only up to an uncertainty set. The question is: under the worst-case point of that set, how heavy does the drone become?
+
+Two sets are exercised:
+
+- A `Box`: rectangular ranges on the two parameters, with each range declared in the "more is better" direction so the worst case is the corner where both parameters take their lowest values.
+- An `Ellipsoid`: a tilted, correlated set smaller than the box; the worst case lies on its boundary in the direction of badness, not at a corner.
+
+Set-based uncertainty fits MCDP naturally: monotonicity means the worst case is always on the set's boundary, in the direction of badness, and the answer is a single antichain rather than a distribution.
+"""),
+    ("md", "## Imports and modules"),
+    ("code", """from codesign import Box, Ellipsoid, Module, Reals, System, solve
+
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        self.specific_energy = specific_energy
+        self.efficiency = efficiency
+        super().__init__()
+    def h(self, f):
+        return {"mass": f["capacity"] / (self.specific_energy * self.efficiency)}
+
+class Actuator(Module):
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+    def h(self, f):
+        return {"power": 10.0 * f["lift_force"] ** 2}
+
+def make_drone(battery):
+    sys = System("drone")
+    endurance     = sys.provides("endurance",     unit="s")
+    extra_payload = sys.provides("extra_payload", unit="kg")
+    extra_power   = sys.provides("extra_power",   unit="W")
+    total_mass    = sys.requires("total_mass",    unit="kg")
+    b = sys.add("battery",  battery)
+    a = sys.add("actuator", Actuator())
+    b.capacity    >= (a.power + extra_power) * endurance
+    a.lift_force  >= 9.81 * (b.mass + extra_payload)
+    total_mass    >= b.mass + extra_payload
+    return sys.build()
+
+f = {"endurance": 300.0, "extra_payload": 0.5, "extra_power": 5.0}"""),
+    ("md", "## Nominal: no uncertainty"),
+    ("code", """drone = make_drone(Battery())
+nominal = solve(drone, f)
+nominal_mass = list(nominal.antichain.points)[0]["total_mass"]
+print(f"nominal total_mass = {nominal_mass:.4f} kg")"""),
+    ("md", """## Box uncertainty
+
+The Box puts independent ranges on each parameter. Because both are declared "more is better," the worst case is the single corner where specific_energy = 1.6e6 and efficiency = 0.80.
+"""),
+    ("code", """bat = Battery()
+bat.uncertain_set = Box(
+    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
+    efficiency=(0.80, 0.90, "more_is_better"),
+)
+drone = make_drone(bat)
+
+r_box = solve(drone, f, uncertainty=["worst_case"])
+wc = list(r_box.worst_case.antichain.points)[0]["total_mass"]
+print(f"Box worst case: {wc:.4f} kg  (penalty {wc - nominal_mass:+.4f} kg)")"""),
+    ("md", """## Ellipsoid uncertainty (smaller, correlated set)
+
+The Ellipsoid carves out the implausible corner where both parameters are simultaneously at their extremes. The worst case lies on the curved boundary in the direction of badness, which is closer to the centre than the box's worst-case corner.
+"""),
+    ("code", """bat = Battery()
+bat.uncertain_set = Ellipsoid(
+    center={"specific_energy": 1.8e6, "efficiency": 0.85},
+    cov=[
+        [1.0e10, -2.0e3],
+        [-2.0e3,  2.5e-3],
+    ],
+    params=["specific_energy", "efficiency"],
+    directions={
+        "specific_energy": "more_is_better",
+        "efficiency":      "more_is_better",
+    },
+)
+drone = make_drone(bat)
+
+r_ell = solve(drone, f, uncertainty=["worst_case"])
+wc_ell = list(r_ell.worst_case.antichain.points)[0]["total_mass"]
+print(f"Ellipsoid worst case: {wc_ell:.4f} kg  (penalty {wc_ell - nominal_mass:+.4f} kg)")"""),
+    ("md", """## Summary
+
+| Set       | Worst-case mass | Penalty vs nominal |
+|-----------|-----------------|--------------------|
+| (nominal) | 0.5602 kg       | -                  |
+| Box       | 0.5760 kg       | +0.0158 kg         |
+| Ellipsoid | 0.5652 kg       | +0.0050 kg         |
+
+The ellipsoid is the more honest model when you believe the two parameters are correlated, since it rejects the "both at the worst simultaneously" combination as implausible. The 2D conveniences `Disk(center, radius)` and `Circle(center, radius)` are special cases of `Ellipsoid`.
+"""),
+]
+
+
+# ---------------------------------------------------------------------------
+# 12 Stochastic uncertainty with Gaussian copula
+# ---------------------------------------------------------------------------
+
+NB_12 = [
+    ("md", """# 12. Stochastic uncertainty with a Gaussian copula
+
+When the parameters aren't just bounded but have probability distributions, the analysis shifts from "worst case" to "statistical summaries." This notebook exercises Monte Carlo sampling with a Gaussian copula glueing two marginals together, and shows how a single solve call returns several summaries at once.
+
+The drone has both `uncertain_set` (a Box) and `uncertain_dist` (a Stochastic with a Gaussian copula) attached to its battery. We ask for both kinds of answers and see how they compare.
+"""),
+    ("md", "## Imports and model"),
+    ("code", """from scipy import stats
+from codesign import (
+    Box, GaussianCopula, Module, Reals, Stochastic, System, solve,
+)
+
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        self.specific_energy = specific_energy
+        self.efficiency = efficiency
+        super().__init__()
+    def h(self, f):
+        return {"mass": f["capacity"] / (self.specific_energy * self.efficiency)}
+
+class Actuator(Module):
+    F = {"lift_force": Reals(unit="N")}
+    R = {"power":      Reals(unit="W")}
+    def h(self, f):
+        return {"power": 10.0 * f["lift_force"] ** 2}
+
+bat = Battery()
+bat.uncertain_set = Box(
+    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
+    efficiency=(0.80, 0.90, "more_is_better"),
+)
+bat.uncertain_dist = Stochastic(
+    marginals={
+        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
+        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+    },
+    copula=GaussianCopula(correlation=[[1.0, 0.4],
+                                       [0.4, 1.0]]),
+)
+
+sys = System("drone")
+endurance     = sys.provides("endurance",     unit="s")
+extra_payload = sys.provides("extra_payload", unit="kg")
+extra_power   = sys.provides("extra_power",   unit="W")
+total_mass    = sys.requires("total_mass",    unit="kg")
+b = sys.add("battery",  bat)
+a = sys.add("actuator", Actuator())
+b.capacity    >= (a.power + extra_power) * endurance
+a.lift_force  >= 9.81 * (b.mass + extra_payload)
+total_mass    >= b.mass + extra_payload
+drone = sys.build()
+f = {"endurance": 300.0, "extra_payload": 0.5, "extra_power": 5.0}"""),
+    ("md", "## A nominal solve, for reference"),
+    ("code", """nominal = solve(drone, f)
+nominal_mass = list(nominal.antichain.points)[0]["total_mass"]
+print(f"Nominal mass: {nominal_mass:.4f} kg")"""),
+    ("md", """## All summaries in one call
+
+The solver gathers the deterministic worst case and runs the Monte Carlo for all the statistical summaries in a single pass.
+"""),
+    ("code", """res = solve(
+    drone, f,
+    uncertainty=["worst_case", "mean", "p95", "cvar95", "samples"],
+    n_samples=1000,
+    rng_seed=42,
+    verbose=1,
+)
+
+wc = list(res.worst_case.antichain.points)[0]["total_mass"]
+print()
+print(f"Worst case (Box):     {wc:.4f} kg")
+print(f"Mean:                 {res.mean['total_mass']:.4f} kg")
+print(f"95th percentile:      {res.p95['total_mass']:.4f} kg")
+print(f"CVaR (worst 5% mean): {res.cvar95['total_mass']:.4f} kg")
+print(f"Feasibility rate:     {res.feasibility_rate:.3f}")"""),
+    ("md", """## Visualising the distribution
+
+The raw antichain per MC sample is on `res.samples`. For this single-output drone we can plot a histogram of `total_mass` and mark each summary.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+import numpy as np
+
+feasible_masses = [
+    list(s.points)[0]["total_mass"]
+    for s in res.samples
+    if not s.has_any_top() and not s.is_empty()
+]
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.hist(feasible_masses, bins=30, alpha=0.5, color="steelblue", edgecolor="black")
+
+# Mark the summaries.
+ax.axvline(nominal_mass, color="gray", linestyle=":", label=f"nominal {nominal_mass:.4f}")
+ax.axvline(res.mean["total_mass"], color="green", linestyle="-", label=f"mean {res.mean['total_mass']:.4f}")
+ax.axvline(res.p95["total_mass"], color="orange", linestyle="-", label=f"p95 {res.p95['total_mass']:.4f}")
+ax.axvline(res.cvar95["total_mass"], color="red", linestyle="-", label=f"CVaR95 {res.cvar95['total_mass']:.4f}")
+ax.axvline(wc, color="black", linestyle="--", label=f"worst case (Box) {wc:.4f}")
+
+ax.set_xlabel("total_mass [kg]")
+ax.set_ylabel("samples")
+ax.set_title("Monte Carlo distribution of total_mass, with summaries")
+ax.legend(loc="upper left", fontsize=9)
+plt.tight_layout()
+plt.show()"""),
+    ("md", """## Reading the chart
+
+- **nominal** is what you'd get if you ignored the uncertainty entirely (parameters at their declared centres).
+- **mean** is the expected total_mass over the joint distribution. Slightly above nominal because the distribution is skewed (the parameters' product is harmonic-mean-like; small values dominate).
+- **p95** is "95% of designs are no heavier than this." Pessimistic but useful for typical specification claims.
+- **CVaR95** is "the average mass over the worst 5% of scenarios." Standard for engineering risk.
+- **worst case (Box)** is the deterministic upper bound from the set-based analysis. Slightly above CVaR95 because the Box admits the implausible corner.
+
+A natural ordering emerges: `nominal < mean < p95 < CVaR95 < worst_case`. For a normal-design specification you'd usually report the p95 or CVaR95; the worst case is the right answer when failures truly mean disaster.
+"""),
+]
+
+
+# ---------------------------------------------------------------------------
 # Build all notebooks
 # ---------------------------------------------------------------------------
 
@@ -979,6 +1314,9 @@ def main():
         ("07_drone_modular.ipynb", NB_07),
         ("08_vehicle_modular.ipynb", NB_08),
         ("09_robotic_arm.ipynb", NB_09),
+        ("10_solver_trace.ipynb", NB_10),
+        ("11_uncertain_drone.ipynb", NB_11),
+        ("12_stochastic_drone.ipynb", NB_12),
     ]
     for name, cells in plan:
         write(name, cells)

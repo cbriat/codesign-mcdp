@@ -38,8 +38,8 @@ def plot_trace(c_value: int, out_path: str):
 
     # Pick axis bounds wide enough to show convergence comfortably.
     max_xy = 1
-    for A in trace:
-        for p in A.points:
+    for entry in trace:
+        for p in entry.antichain.points:
             x = p["xy"]["x"]
             y = p["xy"]["y"]
             if x != float("inf"):
@@ -48,7 +48,8 @@ def plot_trace(c_value: int, out_path: str):
                 max_xy = max(max_xy, int(y))
     bound = max_xy + 3
 
-    for k, A in enumerate(trace):
+    for k, entry in enumerate(trace):
+        A = entry.antichain
         ax = axes[k]
         xs, ys = [], []
         for p in A.points:

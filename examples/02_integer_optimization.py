@@ -146,7 +146,8 @@ def run(c_value: int, show_trace: bool = True):
     result = solve(looped, {"c": c_value}, max_iter=50, record_trace=show_trace)
     print(f"\nc = {c_value}: iters = {result.iterations}, feasible = {result.feasible}")
     if show_trace and result.trace:
-        for k, A in enumerate(result.trace):
+        for k, entry in enumerate(result.trace):
+            A = entry.antichain
             pts = ", ".join(
                 f"({p['xy']['x']}, {p['xy']['y']})" for p in A.points
             )

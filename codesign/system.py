@@ -378,8 +378,13 @@ class System:
             F=inner_F, R=inner_R, h_fn=inner_h, name=f"{self.name}_inner"
         )
         if not modules:
+            inner._codesign_modules = {}
             return inner
-        return Loop(inner, axis=_MODULES_AXIS)
+        result = Loop(inner, axis=_MODULES_AXIS)
+        # Attach a reference to the modules dict so the uncertainty solver
+        # (and other tooling) can find the Module instances after build().
+        result._codesign_modules = dict(modules)
+        return result
 
     # ------------------------------------------------------------------ #
     # Repr

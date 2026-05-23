@@ -217,6 +217,9 @@ payload), the iteration drives the loop variable to ⊤ and the result reports
 * `07_drone_modular.py` – the same drone with `System`, written with `Module` classes and the operator-overloaded `>=` constraint syntax.
 * `08_vehicle_modular.py` – motor catalog + chassis + battery wired with the operator syntax, producing a multi-point Pareto front.
 * `09_robotic_arm.py` – five subsystems (two joints, sensor, controller, battery) with non-trivial cyclic couplings, demonstrating where the operator syntax really pays off.
+* `10_solver_trace.py` – the solver's observability features: `trace`, `verbose`, `on_iteration` callback, and the `status` field.
+* `11_uncertain_drone.py` – set-based deterministic uncertainty on internal parameters: worst case under a `Box` and an `Ellipsoid`.
+* `12_stochastic_drone.py` – Monte Carlo with a Gaussian copula, returning worst-case + mean + p95 + CVaR95 from a single solve call.
 
 Run any of them with `python -m examples.NN_name`. The visualization example
 also needs matplotlib (`pip install matplotlib`).
@@ -264,10 +267,36 @@ python build_notebooks.py
 result = solve(dp, {"capacity": 3.6e6})
 result.antichain    # the Pareto front (an Antichain[R])
 result.iterations   # number of Kleene steps (0 if no loop)
+result.status       # "converged" | "max_iter" | "diverged"
 result.feasible     # True iff at least one finite minimal resource bundle exists
-result.converged    # True iff iteration hit a fixed point within max_iter
-result.trace        # the sequence S_0, S_1, ... when record_trace=True
+result.trace        # list of TraceEntry when trace=True, else None
+result.converged    # backward-compat alias for status == "converged"
 ```
+
+`status` and `feasible` are orthogonal. `status="converged"` with `feasible=False` is a clean infeasibility (the antichain settled at ⊤). `status="max_iter"` with `feasible=True` means we ran out of iterations but the run was still feasible-looking; usually a sign to increase `max_iter`. `status="diverged"` means a numeric value crossed the divergence cap before the iteration could settle.
+
+### Watching the solver work
+
+```python
+# Live printing
+result = solve(dp, f, verbose=1)   # one summary line at the end
+result = solve(dp, f, verbose=2)   # per-iteration progress feed
+
+# Structured trace
+result = solve(dp, f, trace=True)
+for entry in result.trace:
+    print(entry.iteration, entry.n_points, entry.delta, entry.elapsed_ms)
+
+# Callback
+def my_logger(entry):
+    if entry.iteration % 10 == 0:
+        print(f"iter {entry.iteration}: delta={entry.delta}")
+result = solve(dp, f, on_iteration=my_logger)
+```
+
+`trace=False` by default, so the existing call sites pay nothing.
+
+### Cost minimisation
 
 When the antichain has multiple incomparable points (genuine tradeoffs),
 `minimize_cost` collapses it to one design under a scalar objective:
@@ -277,6 +306,56 @@ from codesign import minimize_cost
 
 best = minimize_cost(result, cost_fn=lambda r: r["weight"] + 0.1 * r["cost"])
 ```
+
+## Uncertainty
+
+Modules can carry deterministic, set-based uncertainty on their internal parameters (`uncertain_set`), stochastic uncertainty (`uncertain_dist`), or both. A single `solve(..., uncertainty=[...])` call returns the worst-case answer alongside statistical summaries:
+
+```python
+from scipy import stats
+from codesign import Module, Reals, Box, Stochastic, GaussianCopula, System, solve
+
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        self.specific_energy = specific_energy
+        self.efficiency = efficiency
+        super().__init__()
+    def h(self, f):
+        return {"mass": f["capacity"] / (self.specific_energy * self.efficiency)}
+
+b = Battery()
+# Deterministic set: worst case is the corner where both params are at their
+# lowest declared values.
+b.uncertain_set = Box(
+    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
+    efficiency=(0.80, 0.90, "more_is_better"),
+)
+# Stochastic with correlation: two uniform marginals tied by a Gaussian copula.
+b.uncertain_dist = Stochastic(
+    marginals={
+        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
+        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+    },
+    copula=GaussianCopula(correlation=[[1.0, 0.4], [0.4, 1.0]]),
+)
+
+# ... wire b into a System ...
+
+result = solve(drone, f,
+               uncertainty=["worst_case", "mean", "p95", "cvar95", "samples"],
+               n_samples=1000, rng_seed=42)
+
+result.worst_case        # SolveResult-equivalent at the worst point of the set
+result.mean              # dict[r_port -> mean across MC samples]
+result.p95               # dict[r_port -> 95th percentile]
+result.cvar95            # dict[r_port -> CVaR at the 95% level]
+result.samples           # list of antichains, one per MC sample
+result.feasibility_rate  # fraction of MC samples that came back feasible
+```
+
+The uncertainty sets supported in v1 are `Box` (n-D, axis-aligned), `Ellipsoid` (n-D, possibly tilted), plus the 2D conveniences `Disk` and `Circle`. Stochastic dependence is described by a `Copula` (`Independence` by default, `GaussianCopula(correlation=...)` for correlated marginals). Each `Box`/`Ellipsoid` parameter can be declared with a "direction of badness" (`"more_is_better"`, `"more_is_worse"`, etc.); declared directions enable an analytic worst-case computation, undeclared directions trigger a boundary search.
 
 ## How the solver works
 

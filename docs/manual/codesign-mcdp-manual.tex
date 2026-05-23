@@ -691,6 +691,231 @@ minimises \texttt{cost\_fn}, or \texttt{None} if the result is
 infeasible. This is the scalarisation step that turns a Pareto front
 into a single engineering choice.
 
+\subsection{Observability: trace, verbose, callback, status}
+\label{sec:solver-observability}
+
+The solver can be made to report its progress in three independent
+ways, and its termination reason is exposed through a structured
+\texttt{status} field that is orthogonal to \texttt{feasible}.
+
+\paragraph{The \texttt{status} field.} \texttt{SolveResult.status} is
+one of three strings:
+\begin{description}
+\item[\texttt{"converged"}] The iteration reached a fixed point (or
+provably hit $\top$) within \texttt{max\_iter} steps. The answer in
+\texttt{result.antichain} is the algorithm's verdict; \texttt{feasible}
+tells you whether that verdict is finite (a real design) or $\top$
+(no design exists).
+\item[\texttt{"max\_iter"}] The iteration was cut off at
+\texttt{max\_iter}. The current antichain may or may not be near a
+fixed point. Usually a sign to increase \texttt{max\_iter}, or to look
+for an unintentional non-monotonicity in the model.
+\item[\texttt{"diverged"}] At least one numeric component crossed the
+divergence cap of $10^{30}$ before the iteration could settle, and the
+solver stopped. Distinguishes pure numerical blow-up from clean
+$\top$-infeasibility.
+\end{description}
+The previous Boolean \texttt{converged} field is preserved as a
+backward-compatibility alias for \texttt{status == "converged"}.
+
+\paragraph{Structured trace.} Passing \texttt{trace=True} to
+\texttt{solve} populates \texttt{result.trace} with a list of
+\texttt{TraceEntry} dataclasses, one per Kleene step (plus the seed at
+iteration~0):
+\begin{lstlisting}
+@dataclass
+class TraceEntry:
+    iteration: int           # 0 = seed, then 1, 2, ...
+    antichain: Antichain     # snapshot at this step
+    n_points:  int           # convenience: len(antichain)
+    delta:     float | None  # max absolute change (numeric)
+                             # or 0/1 (discrete); None at iter 0
+    elapsed_ms: float        # wall time for this step alone
+\end{lstlisting}
+With \texttt{trace=False} (the default) the field is \texttt{None}, so
+the cost of unused tracing is zero.
+
+\paragraph{Verbose printing.} The integer \texttt{verbose} controls
+live output:
+\begin{description}
+\item[\texttt{verbose=0}] (default) silent.
+\item[\texttt{verbose=1}] one summary line at the end, e.g.\
+\texttt{[solve] converged: 17 iters, |A|=1, total=2.0ms, feasible=True}.
+\item[\texttt{verbose=2}] one line per iteration, showing the delta,
+the antichain size, and the step's wall time. Useful for watching
+oscillating fixed points.
+\end{description}
+
+\paragraph{Iteration callback.} Passing
+\texttt{on\_iteration=callable} registers a callback that receives
+each \texttt{TraceEntry} as soon as it is produced. Useful for live
+plots, custom logging, or interrupting an iteration that looks
+pathological:
+\begin{lstlisting}
+def log_every_5(entry):
+    if entry.iteration % 5 == 0:
+        print(f"iter {entry.iteration}: delta={entry.delta:.3e}")
+
+solve(dp, f, on_iteration=log_every_5)
+\end{lstlisting}
+
+% ===========================================================================
+\section{Uncertainty}
+\label{sec:uncertainty}
+% ===========================================================================
+
+Two kinds of parameter uncertainty are supported, declared on
+\texttt{Module} instances and consumed by the same \texttt{solve}
+entry point. Both are independent of the model's structure: a module
+can have set-based uncertainty, stochastic uncertainty, both, or
+neither.
+
+\subsection{Declaration}
+
+A \texttt{Module} carries optional attributes:
+\begin{lstlisting}
+class Battery(Module):
+    F = {"capacity": Reals(unit="J")}
+    R = {"mass":     Reals(unit="kg")}
+
+    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        self.specific_energy = specific_energy
+        self.efficiency = efficiency
+        super().__init__()
+
+    def h(self, f):
+        return {"mass": f["capacity"]
+                       / (self.specific_energy * self.efficiency)}
+
+b = Battery()
+b.uncertain_set  = Box(...)          # deterministic, set-based
+b.uncertain_dist = Stochastic(...)   # statistical
+\end{lstlisting}
+The uncertainty solver discovers every such module by walking the
+\verb|_codesign_modules| attribute that \texttt{System.build} attaches
+to the returned DP. Before each solve, the module's named parameters
+are reassigned; afterwards, their nominal values are restored. The
+user's original \texttt{Battery()} instance is unchanged.
+
+\subsection{Set-based uncertainty (deterministic)}
+
+\paragraph{\texttt{Box}.} Axis-aligned interval product. Each
+parameter is declared as \texttt{(lo, hi)} or \texttt{(lo, hi, direction)},
+where \texttt{direction} is one of the four tokens
+\texttt{"more\_is\_better"}, \texttt{"more\_is\_worse"},
+\texttt{"less\_is\_better"}, \texttt{"less\_is\_worse"}. With all
+directions declared, the worst case is a single corner read off in
+constant time:
+\begin{lstlisting}
+b.uncertain_set = Box(
+    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
+    efficiency=(0.80, 0.90, "more_is_better"),
+)
+# worst case = (specific_energy=1.6e6, efficiency=0.80)
+\end{lstlisting}
+When some directions are undeclared, all $2^n$ endpoint combinations
+are evaluated and the worst is kept; cheap when $n$ is modest.
+
+\paragraph{\texttt{Ellipsoid}.} An $n$-D ellipsoid
+$(p - c)^\top \Sigma^{-1} (p - c) \leq 1$ in parameter space. The
+covariance $\Sigma$ encodes both scale and correlation between
+parameters, so an ellipsoid is a more honest model than a box when
+parameters are believed to vary together:
+\begin{lstlisting}
+b.uncertain_set = Ellipsoid(
+    center={"specific_energy": 1.8e6, "efficiency": 0.85},
+    cov=[
+        [1.0e10, -2.0e3],
+        [-2.0e3,  2.5e-3],
+    ],
+    params=["specific_energy", "efficiency"],
+    directions={
+        "specific_energy": "more_is_better",
+        "efficiency":      "more_is_better",
+    },
+)
+\end{lstlisting}
+With all directions declared, the worst case is the boundary point
+$c + L\,u^\star$, where $L$ is the Cholesky factor of $\Sigma$ and
+$u^\star$ is the unit vector in the direction of badness. Otherwise,
+the boundary is sampled (controlled by \texttt{boundary\_samples}) and
+the worst sample is returned.
+
+\paragraph{2D conveniences.} \texttt{Disk(center, radius, ...)} and
+\texttt{Circle(center, radius, ...)} reduce to the isotropic
+ellipsoid $\Sigma = r^2 I$. For monotone systems with declared
+directions, the two are equivalent: the worst case lies on the
+boundary either way.
+
+\subsection{Stochastic uncertainty}
+
+\paragraph{\texttt{Stochastic}.} A joint distribution built from
+named scipy-stats frozen marginals plus a copula:
+\begin{lstlisting}
+from scipy import stats
+
+b.uncertain_dist = Stochastic(
+    marginals={
+        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
+        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+    },
+    copula=GaussianCopula(correlation=[[1.0, 0.4],
+                                        [0.4, 1.0]]),
+)
+\end{lstlisting}
+Sampling is by the standard copula--marginal trick: the copula
+generates correlated uniforms in $[0,1]^d$; the marginal \texttt{ppf}s
+map them to the named parameter axes.
+
+\paragraph{Copulas.} \texttt{Independence()} is the default
+(coordinatewise uniform). \texttt{GaussianCopula(correlation)} uses
+the Gaussian copula with the given correlation matrix; samples are
+drawn by Cholesky factorisation followed by $\Phi$ on each
+coordinate. Subclassing \texttt{Copula} requires only one method,
+\texttt{sample\_uniform(n, d, rng)}, so other copulas (e.g.\ Clayton,
+Gumbel) drop in without further plumbing.
+
+\subsection{Querying}
+
+The same \texttt{solve} entry point accepts an \texttt{uncertainty}
+list and returns a richer object:
+\begin{lstlisting}
+result = solve(
+    dp, f,
+    uncertainty=["worst_case", "mean", "p95", "cvar95", "samples"],
+    n_samples=1000,
+    rng_seed=42,
+)
+
+result.worst_case        # SolveResult at the worst point of the set
+result.mean              # dict[r_port -> mean across MC samples]
+result.p95               # dict[r_port -> 95th percentile]
+result.cvar95            # dict[r_port -> CVaR at 95% level]
+result.samples           # list[Antichain], one per MC sample
+result.feasibility_rate  # fraction of feasible MC samples
+\end{lstlisting}
+
+The allowed labels are:
+\begin{description}
+\item[\texttt{"worst\_case"}] The deterministic worst over every
+module's \texttt{uncertain\_set}. One canonical solve at the
+worst-case parameter point.
+\item[\texttt{"mean"}, \texttt{"p95"}, \texttt{"cvar95"}] Marginal
+statistics over Monte Carlo samples, drawn from every module's
+\texttt{uncertain\_dist}. The CVaR (conditional value at risk) at the
+95\% level is the mean of the worst 5\% of samples.
+\item[\texttt{"samples"}] The raw antichain per MC sample, for the
+user to aggregate however they like.
+\end{description}
+
+For a single solve call you typically observe the ordering
+\[
+\text{nominal} < \text{mean} < \text{p95} < \text{CVaR95} < \text{worst\_case},
+\]
+which separates the four standard ways of reporting an answer "under
+uncertainty." Notebooks 11 and 12 visualise this for the
+example-7 drone.
+
 % ===========================================================================
 \section{The MCDP Builder}
 \label{sec:mcdp-builder}
@@ -884,9 +1109,9 @@ message identifying the missing or invalid item.
 \label{sec:examples}
 % ===========================================================================
 
-The package ships eight runnable examples under \texttt{examples/} and
-the same eight as executed notebooks under \texttt{notebooks/}. Each is
-referenced below by its filename.
+The package ships twelve runnable examples under \texttt{examples/}
+and the same twelve as executed notebooks under \texttt{notebooks/}.
+Each is referenced below by its filename.
 
 \subsection{Example 1: the drone (Fig. 48 of the paper)}
 
@@ -979,6 +1204,44 @@ demonstration of where the operator-overloaded syntax pays off: each
 constraint line states one physical relationship, and the cyclic
 structure emerges from the constraint graph rather than from explicit
 loop machinery.
+
+\subsection{Example 10: watching the solver work}
+
+\texttt{10\_solver\_trace.py}. The drone of example 7 instrumented to
+show every observability feature of \texttt{solve}: silent mode, the
+end-of-solve summary line (\texttt{verbose=1}), the per-iteration
+progress feed (\texttt{verbose=2}), the structured trace
+(\texttt{trace=True}), and a custom \texttt{on\_iteration} callback.
+The same script runs the drone with three different \texttt{max\_iter}
+caps and a deliberately under-resourced mission, demonstrating that
+\texttt{status} takes the three distinct values \texttt{"converged"},
+\texttt{"max\_iter"}, and \texttt{"diverged"} on these inputs. The
+notebook version (\texttt{10\_solver\_trace.ipynb}) adds a
+delta-vs-iteration plot showing the characteristic oscillating decay
+of the Kleene iteration to machine precision.
+
+\subsection{Example 11: set-based deterministic uncertainty}
+
+\texttt{11\_uncertain\_drone.py}. The drone's battery has two
+internal parameters (specific energy, efficiency) declared with
+"more is better" directions. First a \texttt{Box} with independent
+ranges, then a tilted \texttt{Ellipsoid} of the same widths. The
+worst-case mass under the box is +0.0158\,kg above nominal; under the
+ellipsoid it is +0.0050\,kg. The discrepancy is the cost of admitting
+the implausible corner where both parameters are simultaneously at
+their worst; the ellipsoid model rejects it explicitly.
+
+\subsection{Example 12: stochastic uncertainty with a Gaussian copula}
+
+\texttt{12\_stochastic\_drone.py}. The same drone with two uniform
+marginals tied by a Gaussian copula at correlation~0.4. A single
+\texttt{solve} call requests all five summaries:
+\texttt{worst\_case}, \texttt{mean}, \texttt{p95}, \texttt{cvar95},
+\texttt{samples}. Over a thousand Monte Carlo samples, the five
+values come out as nominal $<$ mean $<$ p95 $<$ CVaR95 $<$
+worst\_case, the canonical ordering. The notebook adds a matplotlib
+histogram of the MC distribution with vertical markers at each
+summary.
 
 % ===========================================================================
 \section{Modelling Guidelines and Pitfalls}
@@ -1092,7 +1355,7 @@ below.
 
 \paragraph{Solver.}
 \texttt{solve}, \texttt{kleene\_loop}, \texttt{minimize\_cost},
-\texttt{SolveResult}.
+\texttt{SolveResult}, \texttt{TraceEntry}.
 
 \paragraph{Builders.}
 \texttt{MCDP}, \texttt{System}.
@@ -1104,6 +1367,15 @@ below.
 \texttt{Port}, \texttt{Expr}, \texttt{ModuleHandle} (returned by
 \texttt{System.add}), and the helper functions \texttt{sqrt},
 \texttt{exp}, \texttt{log} for use inside constraint expressions.
+
+\paragraph{Uncertainty.}
+Set-based: \texttt{UncertaintySet} (abstract), \texttt{Box},
+\texttt{Ellipsoid}, \texttt{Disk}, \texttt{Circle}.
+Stochastic: \texttt{Stochastic}, plus copulas
+\texttt{Independence} and \texttt{GaussianCopula}.
+Result: \texttt{UncertaintyResult}.
+Entry point: \texttt{solve\_with\_uncertainty} (the same machinery is
+also reachable through \texttt{solve(dp, f, uncertainty=[...])}).
 
 \paragraph{Module-level.}
 \texttt{\_\_version\_\_} (the string \texttt{"0.1.0"}).

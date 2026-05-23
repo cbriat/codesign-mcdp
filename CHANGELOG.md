@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### Solver observability
+- `TraceEntry` dataclass capturing per-iteration state: `iteration`,
+  `antichain`, `n_points`, `delta` (max absolute change for numeric
+  posets, set-change indicator otherwise), and `elapsed_ms`.
+- `solve(..., trace=True)` collects a list of `TraceEntry` on
+  `result.trace`. Default is `False`, so existing call sites pay nothing.
+- `solve(..., verbose=0|1|2)` controls live printing: silent, one summary
+  line at the end, or a per-iteration progress feed.
+- `solve(..., on_iteration=callable)` callback receives each `TraceEntry`
+  as it is produced, suitable for live plots or custom logging.
+- New `SolveResult.status` field with three values: `"converged"`,
+  `"max_iter"`, `"diverged"`. Orthogonal to `feasible`. The previous
+  `converged` field is preserved as a backward-compat alias for
+  `status == "converged"`.
+- Divergence guard: when any numeric value in the antichain crosses
+  `DIVERGENCE_CAP = 1e30` before the iteration settles, the solver
+  stops with `status="diverged"`. Distinguishes numerical blow-up from
+  clean ⊤-infeasibility.
+- Legacy `record_trace=True` and `trace_out=[...]` keyword arguments are
+  preserved as backward-compatible aliases.
+
+#### Uncertainty layer
+- `UncertaintySet` abstract base for deterministic, set-based parameter
+  uncertainty, with concrete implementations:
+    - `Box(name=(lo, hi[, direction]), ...)`: axis-aligned interval
+      product. Each parameter can carry a "direction of badness" token
+      (`"more_is_better"`, `"more_is_worse"`, `"less_is_better"`,
+      `"less_is_worse"`); declared directions give an analytic worst case,
+      undeclared directions trigger a 2^n endpoint search.
+    - `Ellipsoid(center, cov, params, directions=None,
+      boundary_samples=8)`: n-D ellipsoid in parameter space. Analytic
+      worst case when all directions are declared; boundary sampling
+      otherwise.
+    - 2D conveniences `Disk(center, radius, ...)` and
+      `Circle(center, radius, ...)` reduce to isotropic ellipsoids.
+- `Stochastic(marginals, copula=Independence())`: joint distribution
+  built from scipy-stats frozen marginals plus a copula.
+- Copulas: `Independence()` (default) and
+  `GaussianCopula(correlation=...)`, sampled by Cholesky factorisation
+  followed by the standard-normal CDF.
+- `solve(dp, f, uncertainty=[...], n_samples=1000, rng_seed=None)`:
+  unified entry point. Allowed summary labels: `"worst_case"`,
+  `"mean"`, `"p95"`, `"cvar95"`, `"samples"`. Multiple summaries can be
+  requested in a single call.
+- `UncertaintyResult` dataclass with optional fields per requested
+  summary, plus `feasibility_rate` and `n_samples_used`.
+- A `Module` instance carries optional `uncertain_set` and
+  `uncertain_dist` attributes; the uncertainty solver walks the
+  `_codesign_modules` attribute attached to the built DP by
+  `System.build`. Module parameters are saved before each sample and
+  restored afterwards so nominal values are never clobbered.
+
+#### Examples, notebooks, and tests
+- `10_solver_trace.py` / notebook 10: every observability feature in
+  turn, including a deliberately under-iterated solve to show the
+  `"max_iter"` status and a deliberately infeasible solve to show the
+  `"diverged"` status. The notebook plots the delta-vs-iteration curve.
+- `11_uncertain_drone.py` / notebook 11: drone from example 7 with two
+  uncertain internal parameters on the battery; worst case under a
+  `Box` versus an `Ellipsoid`.
+- `12_stochastic_drone.py` / notebook 12: same drone with stochastic
+  uncertainty under a Gaussian copula; all summaries from a single
+  solve call, plus a histogram of the MC distribution (matplotlib in
+  the notebook, ASCII in the script).
+- Three new smoke tests: `test_solver_trace_and_status`,
+  `test_uncertainty_box`, `test_uncertainty_stochastic`.
+
+#### System builder
+- `System.build()` now attaches a `_codesign_modules` dict to the
+  returned DP, exposing the module instances for the uncertainty
+  solver and other inspection tools.
+
+### Changed
+- `SolveResult.trace` is now `None` when tracing is disabled (instead of
+  an empty list), so missing traces are distinguishable from empty ones.
+  The default behaviour is unchanged: with no flags, `trace` is `None`.
+- `solve` and `kleene_loop` now use keyword-only arguments for the new
+  observability and uncertainty options, to avoid call-site ambiguity.
+
 ## [0.1.0] - 2026-05-18
 
 Initial release.
