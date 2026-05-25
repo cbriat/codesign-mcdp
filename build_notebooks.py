@@ -81,18 +81,23 @@ C_LIFT = 10.0      # actuator coefficient, W per N^2 of lift"""),
 
 The functionality is `(endurance, extra_payload, extra_power, battery_mass)` and the resource is `(battery_mass, report_mass)`. Note that `battery_mass` appears on *both* sides: the inner DP receives the current iterate as a functionality input and emits a tightened estimate as a resource output. The `report_mass` is a mirrored copy of the same value so the outer R retains visibility of it (the `Loop` operator projects out the loop axis).
 """),
-    ("code", """F = Ports({
-    "endurance": Reals(unit="s"),
+    ("code", """# Outer F has the mission spec plus the loop axis as an input.
+F = Ports({
+    "endurance":     Reals(unit="s"),
     "extra_payload": Reals(unit="kg"),
-    "extra_power": Reals(unit="W"),
-    "battery_mass": Reals(unit="kg"),
+    "extra_power":   Reals(unit="W"),
+    "battery_mass":  Reals(unit="kg"),    # current iterate, fed back in
 })
+# Inner R emits the tightened battery_mass plus a "report" mirror.
 R = Ports({
-    "battery_mass": Reals(unit="kg"),
-    "report_mass": Reals(unit="kg"),
+    "battery_mass": Reals(unit="kg"),     # what Loop closes on
+    "report_mass":  Reals(unit="kg"),     # what the outer world sees
 })
 
 def h(f):
+    # Short-circuit: if any input has already diverged to +inf, propagate it.
+    # This keeps the iteration well-defined when an intermediate iterate
+    # exceeds the divergence cap and starts producing infinities.
     if (f["battery_mass"] == math.inf or
         f["endurance"] == math.inf or
         f["extra_payload"] == math.inf or
@@ -100,23 +105,33 @@ def h(f):
         return Antichain.singleton(R, {
             "battery_mass": math.inf, "report_mass": math.inf,
         })
+    # Physics:
+    #   lift force      = (battery + payload) * g
+    #   actuator power  = C_LIFT * lift^2
+    #   total power     = actuator + avionics extra
+    #   energy required = total_power * endurance
+    #   battery mass    = energy / specific_energy
     lift = (f["battery_mass"] + f["extra_payload"]) * G
     actuator_power = C_LIFT * lift * lift
     total_power = actuator_power + f["extra_power"]
     energy = total_power * f["endurance"]
     mass = energy / ALPHA
+    # Both R components carry the same number; report_mass is the outer view.
     return Antichain.singleton(R, {
         "battery_mass": mass, "report_mass": mass,
     })
 
 inner = FunctionDP(F=F, R=R, h_fn=h, name="drone")
+# Close the loop on battery_mass: solve() will run the Kleene iteration
+# until the iterate settles (or diverges to +inf).
 drone = Loop(inner, axis="battery_mass")
 drone"""),
     ("md", """## Solving for several mission profiles
 
 We sweep over short, medium, longer, marginal, and clearly-infeasible missions. The marginal and infeasible cases are correctly flagged: the loop axis is driven to `⊤` (infinity) when the recursion does not close on a finite battery mass.
 """),
-    ("code", """cases = [
+    ("code", """# Five mission profiles, ordered roughly by difficulty.
+cases = [
     ("Short, light",   dict(endurance=60.0,   extra_payload=0.10, extra_power=1.0)),
     ("Medium, modest", dict(endurance=300.0,  extra_payload=0.50, extra_power=5.0)),
     ("Longer mission", dict(endurance=600.0,  extra_payload=0.50, extra_power=5.0)),
@@ -124,6 +139,8 @@ We sweep over short, medium, longer, marginal, and clearly-infeasible missions. 
     ("Infeasible",     dict(endurance=1800.0, extra_payload=1.00, extra_power=10.0)),
 ]
 for label, f in cases:
+    # Each solve runs an independent Kleene iteration. max_iter caps the
+    # number of fixed-point steps; the feasible cases converge in ~10-25.
     result = solve(drone, f, max_iter=200)
     print(f"{label:<16} iters={result.iterations:>3}  "
           f"feasible={result.feasible}  {result.antichain}")"""),
@@ -161,22 +178,33 @@ from codesign import (
 The inner DP enumerates every splitting $(c_1, c_2)$ of the deficit into the two coordinates, giving the antichain of points $(x, y)$ with $x + y$ exactly meeting the constraint. The `Loop` on the axis `xy` closes $x_{out} \\geq x_{in}$ and $y_{out} \\geq y_{in}$ simultaneously.
 """),
     ("code", """def make_looped(c_value: int):
+    # Inner posets: x and y are naturals (with +inf as top); xy bundles them.
     N = Naturals()
     XY = Ports({"x": N, "y": N})
+    # F has the parameter c plus the current iterate xy fed back from the loop.
     F = Ports({"c": N, "xy": XY})
+    # R emits the next iterate xy plus a "report" copy the outer world sees.
     R = Ports({"xy": XY, "xy_report": XY})
 
     def h(f):
         c = int(f["c"])
         x_in, y_in = f["xy"]["x"], f["xy"]["y"]
+        # Propagate top through: if either coordinate is +inf, give up.
         if x_in == math.inf or y_in == math.inf:
             top = {"x": math.inf, "y": math.inf}
             return Antichain.singleton(R, {"xy": top, "xy_report": top})
 
+        # ceil(sqrt(x_in)) without floating point: integer-square-root.
+        # If isqrt(n)**2 < n then n was not a perfect square, so we add 1.
         sx = math.isqrt(int(x_in)) + (1 if math.isqrt(int(x_in)) ** 2 < int(x_in) else 0)
         sy = math.isqrt(int(y_in)) + (1 if math.isqrt(int(y_in)) ** 2 < int(y_in) else 0)
+        # The constraint x + y >= ceil(sqrt(x)) + ceil(sqrt(y)) + c, with the
+        # incoming x_in, y_in bounding the ceiling terms.
         target = sx + sy + c
 
+        # Enumerate every (x_out, y_out) with x_out + y_out == target and
+        # both coordinates >= the ceiling lower bound. This gives the full
+        # antichain of splits, which Min will prune as the iteration grows.
         pts = []
         for x_out in range(sx, target - sy + 1):
             y_out = target - x_out
@@ -191,6 +219,7 @@ The inner DP enumerates every splitting $(c_1, c_2)$ of the deficit into the two
         return Antichain.from_set(R, pts)
 
     inner = FunctionDP(F=F, R=R, h_fn=h, name=f"sqrt_sum(c={c_value})")
+    # Close on xy so the iterate feeds itself back through the inequality.
     return Loop(inner, axis="xy")"""),
     ("md", "## Run with trace"),
     ("code", """def pretty(p):
@@ -198,9 +227,11 @@ The inner DP enumerates every splitting $(c_1, c_2)$ of the deficit into the two
 
 def run(c_value, show_trace=True):
     looped = make_looped(c_value)
+    # record_trace=True keeps the full sequence A_0, A_1, ... on result.trace.
     result = solve(looped, {"c": c_value}, max_iter=50, record_trace=show_trace)
     print(f"c = {c_value}: iters = {result.iterations}, feasible = {result.feasible}")
     if show_trace and result.trace:
+        # Print every iterate to show how the antichain evolves.
         for k, entry in enumerate(result.trace):
             A = entry.antichain
             pts = ", ".join(f"({p['xy']['x']}, {p['xy']['y']})" for p in A.points)
@@ -209,6 +240,7 @@ def run(c_value, show_trace=True):
     print(f"   M(c={c_value}) = {{ {pts} }}\\n")
     return result
 
+# Walk through the values from the paper; c=20 is silent to keep output short.
 _ = run(0)
 _ = run(1)
 _ = run(4)
@@ -250,39 +282,60 @@ from codesign import (
 )"""),
     ("md", "## Build the AUV model"),
     ("code", """def make_auv():
-    K_GEOM = 1.0; V_MAX = 3.0; R_MAX = 5.0
-    PSI_A = 30.0; CHI_A = 50.0; SENSOR_COST_A = 200.0
+    # Physical constants for this toy model.
+    K_GEOM = 1.0        # geometric coverage constant (mission area / sweep)
+    V_MAX = 3.0         # vehicle speed cap, m/s
+    R_MAX = 5.0         # sensor footprint cap, m
+    PSI_A = 30.0        # drag power coefficient (P_drag = PSI * v^3)
+    CHI_A = 50.0        # sensor power coefficient (P_sens = CHI * r)
+    SENSOR_COST_A = 200.0  # capex per metre of sensor footprint
 
+    # The design is parameterised by speed v and footprint r; the loop
+    # closes on (v, r) so the iteration converges to a self-consistent set.
     Design = Ports({"v": Reals(unit="m/s"), "r": Reals(unit="m")})
     F = Ports({"A": Reals(unit="m^2"), "design": Design})
     R = Ports({
         "design": Design,
-        "T": Reals(unit="s"), "E": Reals(unit="J"), "cost": Reals(unit="$"),
+        "T": Reals(unit="s"),
+        "E": Reals(unit="J"),
+        "cost": Reals(unit="$"),
     })
 
     def h(f):
         A = f["A"]
         v_in, r_in = f["design"]["v"], f["design"]["r"]
+        # Propagate top through if a previous iterate already diverged.
         if v_in == math.inf or r_in == math.inf:
             return Antichain.singleton(R, {
                 "design": {"v": math.inf, "r": math.inf},
                 "T": math.inf, "E": math.inf, "cost": math.inf,
             })
-        v = max(float(v_in), 0.1); r = max(float(r_in), 0.5)
+        # Floor the inputs so we never compute 1/0; cap them at the physical
+        # limits so the Kleene iteration converges to infeasibility cleanly
+        # if the demand can't be met within V_MAX, R_MAX.
+        v = max(float(v_in), 0.1)
+        r = max(float(r_in), 0.5)
         if v > V_MAX or r > R_MAX:
             return Antichain.singleton(R, {
                 "design": {"v": math.inf, "r": math.inf},
                 "T": math.inf, "E": math.inf, "cost": math.inf,
             })
 
+        # Enumerate a small grid of candidate (v_try, r_try) values.
+        # The factors 1.0, 1.3, 1.7 produce three speeds and three
+        # footprints, so up to nine combinations per iteration. Each gives
+        # a (T, E, cost) triple, and Min over the antichain prunes the
+        # dominated ones automatically.
         pts = []
         for v_try in (v, min(v*1.3, V_MAX), min(v*1.7, V_MAX)):
             for r_try in (r, min(r*1.3, R_MAX), min(r*1.7, R_MAX)):
+                # Only consider candidates that satisfy the monotonicity
+                # contract on the loop axis (output >= input).
                 if v_try < v_in or r_try < r_in:
                     continue
-                T_try = K_GEOM * A / (v_try * r_try)
-                E_try = (PSI_A * v_try**3 + CHI_A * r_try) * T_try
-                cost_try = SENSOR_COST_A * r_try
+                T_try = K_GEOM * A / (v_try * r_try)          # time to cover A
+                E_try = (PSI_A * v_try**3 + CHI_A * r_try) * T_try   # energy
+                cost_try = SENSOR_COST_A * r_try               # sensor capex
                 pts.append({
                     "design": {"v": v_try, "r": r_try},
                     "T": T_try, "E": E_try, "cost": cost_try,
@@ -303,8 +356,11 @@ Each area gives a small (T, E, cost) Pareto front. We then collapse it to a sing
     print(f"   iters={result.iterations}, feasible={result.feasible}")
     if not result.feasible:
         return
+    # Walk the antichain and print every Pareto point.
     for p in result.antichain.points:
         print(f"   T={p['T']:.0f}s, E={p['E']/1000:.1f}kJ, $={p['cost']:.0f}")
+    # Scalarise the Pareto front: weighted sum of time, energy, cost.
+    # The weights here are illustrative; in practice the engineer picks them.
     best = minimize_cost(
         result,
         cost_fn=lambda r: r["T"] + 0.05 * (r["E"] / 1000.0) + r["cost"],
@@ -314,6 +370,7 @@ Each area gives a small (T, E, cost) Pareto front. We then collapse it to a sing
               f"E={best['E']/1000:.1f}kJ, $={best['cost']:.0f}")
     print()
 
+# Three mission scales: 100 m^2, 1000 m^2, 10000 m^2.
 for A in (100.0, 1000.0, 10_000.0):
     result = solve(auv, {"A": A}, max_iter=50)
     show(result, f"Area = {A:g} m^2")"""),
@@ -348,19 +405,24 @@ Old Li-ion cells average 1.6 MJ/kg; newer ones 2.0 MJ/kg. We bracket the unknown
     ("code", """F = Ports({"capacity": Reals(unit="J")})
 R = Ports({"mass": Reals(unit="kg")})
 
+# Two algebraic brackets around the true h. Each captures one end of the
+# specific-energy range; their solutions bracket the true required mass.
 pessimistic = AlgebraicDP(
     F=F, R=R,
-    equations={"mass": lambda f: f["capacity"] / 1.6e6},
+    equations={"mass": lambda f: f["capacity"] / 1.6e6},   # heavy battery
     name="battery_pessimistic",
 )
 optimistic = AlgebraicDP(
     F=F, R=R,
-    equations={"mass": lambda f: f["capacity"] / 2.0e6},
+    equations={"mass": lambda f: f["capacity"] / 2.0e6},   # light battery
     name="battery_optimistic",
 )
+# UncertainDP composes the two brackets into a single DP that can be solved
+# in either mode. mode="upper" means default to the pessimistic bracket.
 uncertain = UncertainDP(F=F, R=R, lower=optimistic, upper=pessimistic, mode="upper")
 
 print("Battery sizing under specific-energy uncertainty (1 kWh capacity):")
+# Solve in both modes to see the interval of feasible designs.
 for mode in ("lower", "upper"):
     result = solve(uncertain.with_mode(mode), {"capacity": 3.6e6})
     mass = list(result.antichain.points)[0]["mass"]
@@ -371,19 +433,23 @@ print("\\nDesigns that survive the pessimistic case are robust to the uncertaint
 
 A heated payload loses heat to the environment proportional to its temperature rise (Newton's cooling). At steady state the input power equals the heat-loss coefficient times the temperature delta. The ODE solver finds the steady state by Newton iteration on $\\dot x = 0$.
 """),
-    ("code", """H_LOSS = 0.8  # W/K
+    ("code", """H_LOSS = 0.8  # W/K, heat-loss coefficient
 
+# rhs: dP/dt = H_LOSS * delta_T - P (so steady state is P = H_LOSS * delta_T).
+# steady_state mode runs Newton iteration on rhs = 0; extract pulls the
+# scalar power out of the converged state.
 heater = ODE_DP(
     F=Ports({"delta_T": Reals(unit="K")}),
     R=Ports({"power": Reals(unit="W")}),
     rhs=lambda x, t, f: H_LOSS * f["delta_T"] - x,
     extract=lambda x: {"power": float(x)},
     mode="steady_state",
-    x0_fn=lambda f: 0.0,
+    x0_fn=lambda f: 0.0,    # seed Newton at P = 0
     name="heater_ode",
 )
 
 print("Power required to hold a steady temperature rise (h_loss = 0.8 W/K):")
+# Sweep over a few temperature deltas; each should produce P = H_LOSS * delta_T.
 for dT in (5.0, 20.0, 50.0):
     result = solve(heater, {"delta_T": dT})
     p = list(result.antichain.points)[0]["power"]
@@ -446,9 +512,11 @@ from codesign import (
     ("md", "## Plot the trace for a given c"),
     ("code", """def plot_trace(c_value):
     looped = make_looped(c_value)
+    # record_trace=True keeps every intermediate antichain on result.trace.
     result = solve(looped, {"c": c_value}, max_iter=50, record_trace=True)
     trace = result.trace
 
+    # Auto-scale the plot to the largest finite coordinate seen across the trace.
     max_xy = 1
     for entry in trace:
         for p in entry.antichain.points:
@@ -457,12 +525,15 @@ from codesign import (
             if y != math.inf: max_xy = max(max_xy, int(y))
     bound = max_xy + 3
 
+    # Lay out a grid of subplots, one per Kleene iteration.
     n = len(trace)
     cols = min(3, n); rows = (n + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(3.0 * cols, 3.0 * rows))
     axes = [axes] if rows * cols == 1 else (axes.flat if rows > 1 else axes)
     axes = list(axes)
 
+    # Render each antichain as a scatter. +inf points are skipped (they
+    # encode infeasibility, not real coordinates to plot).
     for k, entry in enumerate(trace):
         A = entry.antichain
         ax = axes[k]
@@ -479,6 +550,7 @@ from codesign import (
         ax.set_aspect("equal")
         ax.set_title(f"$S_{{{k}}}$ ({len(A.points)} pts)")
         ax.set_xlabel("x"); ax.set_ylabel("y")
+    # Hide any leftover axes from the grid.
     for k in range(len(trace), len(axes)):
         axes[k].set_visible(False)
     fig.suptitle(
@@ -519,19 +591,26 @@ This notebook rebuilds the same drone as notebook **01** with this builder. Outp
     ("md", "## Imports"),
     ("code", "from codesign import MCDP, solve"),
     ("md", "## Build the drone"),
-    ("code", """ALPHA = 1.8e6
-G = 9.81
-C_LIFT = 10.0
+    ("code", """# Same physical constants as notebook 01.
+ALPHA = 1.8e6      # Li-ion specific energy, J/kg
+G = 9.81           # gravity, m/s^2
+C_LIFT = 10.0      # actuator coefficient, W per N^2 of lift
 
+# The `with MCDP(...)` context manager builds an internal port and
+# constraint table; the final m.build() compiles it to a Loop(FunctionDP).
 with MCDP("drone") as m:
+    # provides = outer functionality ports (what the user supplies).
     m.provides("endurance", unit="s")
     m.provides("extra_payload", unit="kg")
     m.provides("extra_power", unit="W")
-    m.provides("battery_mass", unit="kg")
+    m.provides("battery_mass", unit="kg")   # loop axis on the F side
 
-    m.requires("battery_mass", unit="kg")    # loop axis
-    m.requires("report_mass", unit="kg")     # mirror
+    # requires = outer resource ports (what the system needs).
+    m.requires("battery_mass", unit="kg")   # loop axis on the R side
+    m.requires("report_mass",  unit="kg")   # outer-visible mirror
 
+    # The constraint reads exactly like the paper:
+    # battery_mass >= ((battery+payload)*g)^2 * C_LIFT + extra_power) * endurance / alpha
     def battery_mass_eq(f):
         lift = (f["battery_mass"] + f["extra_payload"]) * G
         actuator_power = C_LIFT * lift * lift
@@ -539,14 +618,18 @@ with MCDP("drone") as m:
         energy = total_power * f["endurance"]
         return energy / ALPHA
 
+    # Same expression bound to both R ports.
     m.constraint("battery_mass", battery_mass_eq)
-    m.constraint("report_mass", battery_mass_eq)
+    m.constraint("report_mass",  battery_mass_eq)
+    # Close the loop. The Kleene iteration runs on battery_mass and the
+    # outer R only exposes report_mass to downstream consumers.
     m.loop_on("battery_mass")
 
 drone = m.build()
 drone"""),
     ("md", "## Run the same cases as notebook 01"),
-    ("code", """cases = [
+    ("code", """# Identical mission profiles to notebook 01, for a direct comparison.
+cases = [
     ("Short, light",   dict(endurance=60.0,   extra_payload=0.10, extra_power=1.0)),
     ("Medium, modest", dict(endurance=300.0,  extra_payload=0.50, extra_power=5.0)),
     ("Longer mission", dict(endurance=600.0,  extra_payload=0.50, extra_power=5.0)),
@@ -583,14 +666,20 @@ This is the recommended style for modular design. Each subsystem is a `Module` s
 Each is a self-contained design problem. The constructor accepts parameters so a single class can be reused with different physical constants.
 """),
     ("code", """class Battery(Module):
+    # F, R declared as class-level dicts; the Module base class wires them
+    # into a DesignProblem during __init__.
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
 
     def __init__(self, specific_energy=1.8e6):
+        # Set the instance attribute BEFORE calling super().__init__() so
+        # that any h() called during construction sees it.
         self.specific_energy = specific_energy
         super().__init__()
 
     def h(self, f):
+        # mass = capacity / specific_energy. Returning a dict yields a
+        # singleton antichain.
         return {"mass": f["capacity"] / self.specific_energy}
 
 
@@ -603,6 +692,7 @@ class Actuator(Module):
         super().__init__()
 
     def h(self, f):
+        # Quadratic drag-like power: P = c_lift * F^2.
         return {"power": self.c_lift * f["lift_force"] ** 2}
 
 
@@ -632,10 +722,12 @@ total_mass          >= battery.mass + extra_payload
 
 print(sys)"""),
     ("md", "## Build and solve"),
-    ("code", """drone = sys.build()
+    ("code", """# build() compiles the constraint table into a Loop(System_inner) DP.
+drone = sys.build()
 print(drone)
 print()
 
+# Five mission profiles, ordered roughly by difficulty.
 cases = [
     ("Short, light",   dict(endurance=60.0,   extra_payload=0.10, extra_power=1.0)),
     ("Medium, modest", dict(endurance=300.0,  extra_payload=0.50, extra_power=5.0)),
@@ -644,6 +736,9 @@ cases = [
     ("Infeasible",     dict(endurance=1800.0, extra_payload=1.00, extra_power=10.0)),
 ]
 for label, f in cases:
+    # The System builder bundles every subsystem's R into a single Kleene
+    # axis; iteration counts here are typically a bit higher than the
+    # monolithic Loop version of notebook 01, but converge to the same point.
     result = solve(drone, f, max_iter=200)
     print(f"{label:<16} iters={result.iterations:>3}  "
           f"feasible={result.feasible}  {result.antichain}")"""),
@@ -706,7 +801,11 @@ This notebook also uses the operator-overloaded constraint syntax introduced in 
 
 The catalog has Pareto-incomparable entries (lighter and more expensive vs. heavier and cheaper). `CatalogDP` is kept as a plain function constructor: multi-valued antichains don't fit the `Module` declarative pattern as cleanly.
 """),
-    ("code", """motor = CatalogDP(
+    ("code", """# Seven entries spanning four torque classes. Notice that within each
+# torque rating there can be multiple Pareto-incomparable entries (cheaper
+# but heavier vs lighter but pricier); this is what produces the multi-point
+# antichain at the system level.
+motor = CatalogDP(
     F=Ports({"torque": Reals(unit="N*m")}),
     R=Ports({"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}),
     catalog=[
@@ -723,17 +822,22 @@ The catalog has Pareto-incomparable entries (lighter and more expensive vs. heav
 motor"""),
     ("md", "## Subsystems 2 and 3: chassis and battery as Module classes"),
     ("code", """class Chassis(Module):
+    # The chassis mass and cost scale linearly with the load it supports.
+    # Because the chassis itself contributes to that load, this creates the
+    # cyclic dependency that the Kleene iteration resolves.
     F = {"load": Reals(unit="kg")}
     R = {"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}
 
     def h(self, f):
         return {
-            "mass": 0.6  * f["load"],
-            "cost": 20.0 * f["load"],
+            "mass": 0.6  * f["load"],     # 60% mass per unit supported
+            "cost": 20.0 * f["load"],     # $20 per kg supported
         }
 
 
 class Battery(Module):
+    # Sized purely by the mission energy demand; specific energy 1.8 MJ/kg,
+    # cell cost $0.05 per Wh.
     F = {"energy": Reals(unit="J")}
     R = {"mass":   Reals(unit="kg"), "cost": Reals(unit="USD")}
 
@@ -747,23 +851,30 @@ class Battery(Module):
 The chassis must support payload plus motor plus battery; the motor's torque demand depends on the total moving mass; the battery's energy demand is set externally. Total mass and total cost aggregate from every subsystem.
 """),
     ("code", """G = 9.81
-TORQUE_PER_KG = 0.25
+TORQUE_PER_KG = 0.25     # required torque to accelerate 1 kg
 
 sys = System("vehicle")
 
+# Outer ports: mission spec in, system-level aggregates out.
 payload        = sys.provides("payload",        unit="kg")
 mission_energy = sys.provides("mission_energy", unit="J")
 total_mass     = sys.requires("total_mass",     unit="kg")
 total_cost     = sys.requires("total_cost",     unit="USD")
 
+# Three subsystems. Each returns a ModuleHandle whose attributes are ports.
 m = sys.add("motor",   motor)
 c = sys.add("chassis", Chassis())
 b = sys.add("battery", Battery())
 
+# Connection constraints. Each line reads like a textbook inequality:
+#   chassis must support payload + motor + battery
+#   motor torque must accelerate payload + chassis + battery
+#   battery energy must meet the mission demand
 c.load   >= payload + m.mass + b.mass
 m.torque >= TORQUE_PER_KG * G * (payload + c.mass + b.mass)
 b.energy >= mission_energy
 
+# Outer-R aggregation: total mass and cost roll up from every subsystem.
 total_mass >= payload + m.mass + c.mass + b.mass
 total_cost >= m.cost + c.cost + b.cost
 
@@ -781,12 +892,17 @@ for label, f in cases:
     print(f"{label}: {f_str}")
     print(f"   iters={result.iterations}, feasible={result.feasible}")
     if not result.feasible:
+        # Heaviest case: even the largest motor can't supply enough torque.
+        # The loop axis is driven to top; no special handling needed here.
         print()
         continue
+    # Walk the Pareto front. Cases 1 and 2 produce a 2-point front from the
+    # incomparable motor choices that survive after the chassis grows.
     print(f"   Pareto front ({len(result.antichain.points)} points):")
     for p in result.antichain.points:
         print(f"      total_mass={p['total_mass']:6.2f} kg,  "
               f"total_cost=${p['total_cost']:7.2f}")
+    # Scalarise the front by picking the cheapest design.
     cheapest = minimize_cost(result, cost_fn=lambda r: r["total_cost"])
     if cheapest is not None:
         print(f"   cheapest: total_mass={cheapest['total_mass']:.2f} kg, "
@@ -845,6 +961,9 @@ Each subsystem is a small `Module`. The `Joint` class is reused for both shoulde
 
 
 class Joint(Module):
+    # A torque-and-speed joint. Mass scales with torque (motor_density is
+    # kg per N*m); electric power is torque*speed divided by drivetrain
+    # efficiency. Reused for shoulder (heavier) and elbow (lighter).
     F = {"torque": Reals(unit="N*m"), "speed": Reals(unit="rad/s")}
     R = {"mass":   Reals(unit="kg"),  "electric_power": Reals(unit="W")}
 
@@ -861,6 +980,8 @@ class Joint(Module):
 
 
 class Sensor(Module):
+    # Affine power model: per-sample cost plus a fixed idle draw. Mass
+    # is constant.
     F = {"sample_rate": Reals(unit="Hz")}
     R = {"power": Reals(unit="W"), "mass": Reals(unit="kg")}
 
@@ -869,6 +990,7 @@ class Sensor(Module):
 
 
 class Controller(Module):
+    # Power scales with both input (sensor) and output (command) rates.
     F = {"input_rate": Reals(unit="Hz"), "command_rate": Reals(unit="Hz")}
     R = {"power":      Reals(unit="W"),  "mass":         Reals(unit="kg")}
 
@@ -880,6 +1002,7 @@ class Controller(Module):
 
 
 class Battery(Module):
+    # Same battery as notebook 07: mass = energy / specific_energy.
     F = {"energy": Reals(unit="J")}
     R = {"mass":   Reals(unit="kg")}
 
@@ -1004,6 +1127,7 @@ And the `result.status` field (`"converged"`, `"max_iter"`, `"diverged"`) distin
     ("md", "## A small drone for testing"),
     ("code", """from codesign import Module, Reals, System, solve
 
+# Minimal two-subsystem drone for exercising the observability features.
 class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
@@ -1023,10 +1147,12 @@ extra_power   = sys.provides("extra_power",   unit="W")
 total_mass    = sys.requires("total_mass",    unit="kg")
 b = sys.add("battery",  Battery())
 a = sys.add("actuator", Actuator())
+# Same three-line wiring as notebook 07.
 b.capacity    >= (a.power + extra_power) * endurance
 a.lift_force  >= 9.81 * (b.mass + extra_payload)
 total_mass    >= b.mass + extra_payload
 drone = sys.build()
+# Fixed mission used everywhere in this notebook.
 f = {"endurance": 300.0, "extra_payload": 0.5, "extra_power": 5.0}"""),
     ("md", "## verbose=1: a one-line summary"),
     ("code", "_ = solve(drone, f, verbose=1)"),
@@ -1141,12 +1267,16 @@ print(f"nominal total_mass = {nominal_mass:.4f} kg")"""),
 The Box puts independent ranges on each parameter. Because both are declared "more is better," the worst case is the single corner where specific_energy = 1.6e6 and efficiency = 0.80.
 """),
     ("code", """bat = Battery()
+# Box: independent ranges on each parameter. The direction-of-badness token
+# tells the solver which endpoint is the "worst" - for both parameters here,
+# lower is worse since they're declared "more_is_better".
 bat.uncertain_set = Box(
     specific_energy=(1.6e6, 2.0e6, "more_is_better"),
     efficiency=(0.80, 0.90, "more_is_better"),
 )
 drone = make_drone(bat)
 
+# uncertainty=["worst_case"] runs one solve at the worst corner of the box.
 r_box = solve(drone, f, uncertainty=["worst_case"])
 wc = list(r_box.worst_case.antichain.points)[0]["total_mass"]
 print(f"Box worst case: {wc:.4f} kg  (penalty {wc - nominal_mass:+.4f} kg)")"""),
@@ -1155,11 +1285,15 @@ print(f"Box worst case: {wc:.4f} kg  (penalty {wc - nominal_mass:+.4f} kg)")""")
 The Ellipsoid carves out the implausible corner where both parameters are simultaneously at their extremes. The worst case lies on the curved boundary in the direction of badness, which is closer to the centre than the box's worst-case corner.
 """),
     ("code", """bat = Battery()
+# Ellipsoid: a tilted set centred at the nominal values. The negative
+# off-diagonal cov entry encodes a negative correlation: pessimistic on
+# specific_energy makes optimistic on efficiency more likely, and vice
+# versa. The worst case is therefore not the joint-pessimistic corner.
 bat.uncertain_set = Ellipsoid(
     center={"specific_energy": 1.8e6, "efficiency": 0.85},
     cov=[
-        [1.0e10, -2.0e3],
-        [-2.0e3,  2.5e-3],
+        [1.0e10, -2.0e3],     # variance of specific_energy, covariance
+        [-2.0e3,  2.5e-3],    # covariance, variance of efficiency
     ],
     params=["specific_energy", "efficiency"],
     directions={
@@ -1219,10 +1353,15 @@ class Actuator(Module):
         return {"power": 10.0 * f["lift_force"] ** 2}
 
 bat = Battery()
+# Set-based bracket: the Box gives a deterministic worst-case answer.
 bat.uncertain_set = Box(
     specific_energy=(1.6e6, 2.0e6, "more_is_better"),
     efficiency=(0.80, 0.90, "more_is_better"),
 )
+# Stochastic model: two uniform marginals tied by a Gaussian copula.
+# The 0.4 off-diagonal entry means specific_energy and efficiency are
+# positively correlated in their joint distribution (good cells tend to
+# be efficient too), softening the joint-pessimistic case.
 bat.uncertain_dist = Stochastic(
     marginals={
         "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
@@ -1232,6 +1371,7 @@ bat.uncertain_dist = Stochastic(
                                        [0.4, 1.0]]),
 )
 
+# Wiring identical to notebook 07.
 sys = System("drone")
 endurance     = sys.provides("endurance",     unit="s")
 extra_payload = sys.provides("extra_payload", unit="kg")
@@ -1252,16 +1392,21 @@ print(f"Nominal mass: {nominal_mass:.4f} kg")"""),
 
 The solver gathers the deterministic worst case and runs the Monte Carlo for all the statistical summaries in a single pass.
 """),
-    ("code", """res = solve(
+    ("code", """# Each summary in `uncertainty` triggers one piece of work:
+#   "worst_case" -> one deterministic solve at the Box corner
+#   "mean" / "p95" / "cvar95" -> aggregated over the n_samples MC runs
+#   "samples" -> keep the raw antichain per MC sample on res.samples
+res = solve(
     drone, f,
     uncertainty=["worst_case", "mean", "p95", "cvar95", "samples"],
     n_samples=1000,
-    rng_seed=42,
+    rng_seed=42,           # for reproducible MC draws
     verbose=1,
 )
 
 wc = list(res.worst_case.antichain.points)[0]["total_mass"]
 print()
+# Canonical ordering: nominal < mean < p95 < CVaR95 < worst_case.
 print(f"Worst case (Box):     {wc:.4f} kg")
 print(f"Mean:                 {res.mean['total_mass']:.4f} kg")
 print(f"95th percentile:      {res.p95['total_mass']:.4f} kg")
@@ -1319,6 +1464,9 @@ import numpy as np
 
 
 class SolarArray(Module):
+    # Required peak power is the larger of the user's stated peak demand
+    # and the average daily-energy demand divided by available sun hours.
+    # cost and mass scale linearly with this required peak (kW).
     F = {"peak_power_kw": Reals(unit="kW"),
          "daily_energy_kwh": Reals(unit="kWh")}
     R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg")}
@@ -1331,7 +1479,9 @@ class SolarArray(Module):
         super().__init__()
 
     def h(self, f):
+        # Guard against sun=0 (no sun, infinite array needed).
         sun = max(self.sun_hours_per_day, 1e-6)
+        # Whichever constraint binds: instantaneous peak, or daily average.
         required_peak = max(f["peak_power_kw"],
                             f["daily_energy_kwh"] / sun)
         return {"cost_usd": required_peak * self.cost_per_kw,
@@ -1339,10 +1489,15 @@ class SolarArray(Module):
 
 
 class Battery(Module):
+    # Battery sized to storage demand. Four chemistries differ in specific
+    # energy (Wh/kg), cost density (USD/kWh), and cycle life (equivalent
+    # full-cycles before replacement). The catalogue is a static dict
+    # rather than a CatalogDP since chemistry is a one-shot choice.
     F = {"storage_kwh": Reals(unit="kWh")}
     R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg"),
          "replacements": Reals()}
     CHEMISTRIES = {
+        # name: (Wh/kg, USD/kWh, cycle life)
         "LFP":   (160.0, 130.0, 4000.0),
         "NMC":   (240.0, 175.0, 2000.0),
         "LCO":   (220.0, 180.0,  800.0),
@@ -1360,6 +1515,7 @@ class Battery(Module):
 
     def h(self, f):
         kwh = f["storage_kwh"]
+        # Number of replacements expected over the mission life.
         reps = (self.daily_cycles * 365.0 * self.life_years) / max(self.cycle_life, 1.0)
         return {"cost_usd": kwh * self.cost_density * (1.0 + reps),
                 "mass_kg":  kwh * 1000.0 / max(self.specific_energy, 1e-6),
@@ -1367,6 +1523,8 @@ class Battery(Module):
 
 
 class DieselGenerator(Module):
+    # Capital cost scales with kW capacity; fuel cost scales with kWh used
+    # per month. CO2 emission likewise tracks kWh-per-month consumption.
     F = {"backup_power_kw": Reals(unit="kW"),
          "backup_hours":    Reals(unit="h")}
     R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg"),
@@ -1390,6 +1548,9 @@ class DieselGenerator(Module):
 
 
 class Frame(Module):
+    # The frame mass is 18% of whatever it must support. Because the frame
+    # supports itself too, this creates a self-referential constraint that
+    # the Kleene iteration resolves.
     F = {"supported_mass_kg": Reals(unit="kg")}
     R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg")}
     def h(self, f):
@@ -1464,19 +1625,23 @@ Sweeping `daily_load_kwh` from 5 to 30 kWh in 50 steps. Warm-starting each solve
     ("code", """dp = make_microgrid(chemistry="LFP")
 loads = np.linspace(5.0, 30.0, 50)
 
+# Cold sweep: each solve starts fresh from the bottom antichain.
 cold_iters = 0
 for L in loads:
     f = {"daily_load_kwh": float(L), "peak_load_kw": 3.0, "backup_hours": 12.0}
     r = solve(dp, f, max_iter=400)
     cold_iters += r.iterations
 
+# Warm sweep: each solve reuses the previous fixed point as its seed.
+# Since adjacent parameter values usually have nearby fixed points, the
+# Kleene iteration finishes in fewer steps.
 warm_iters = 0
 prev = None
 for L in loads:
     f = {"daily_load_kwh": float(L), "peak_load_kw": 3.0, "backup_hours": 12.0}
     r = solve(dp, f, max_iter=400, start_from=prev)
     warm_iters += r.iterations
-    prev = r
+    prev = r            # feed this result into the next iteration
 
 print(f"cold total iters: {cold_iters}")
 print(f"warm total iters: {warm_iters}")
@@ -1557,15 +1722,24 @@ from codesign import (
     MonotonicityEvaluator, LinearParametricEvaluator,
 )
 
+# Mission spec: deliver `target_throughput` packages per hour over
+# `target_range` km of daily travel.
 F = Ports({"target_throughput": Reals(unit="pkg/h"),
                   "target_range":      Reals(unit="km")})
+# What the fleet costs: dollars to acquire + kWh to operate.
 R = Ports({"total_cost":   Reals(unit="USD"),
                   "total_energy": Reals(unit="kWh/day")})
 
 def make_dp(robot):
+    # Closed-form inner solve per robot type. capacity = speed * payload
+    # is packages/hour per single robot; total_cost is the fleet size
+    # times unit_cost; total_energy is range times per-km energy times
+    # 24 hours of duty cycle.
     s = robot["speed"]; p = robot["payload"]
     c = robot["unit_cost"]; e = robot["energy_per_km"]
     capacity = s * p  # pkg/h per robot
+    # Default-argument trick captures the loop-variable values at lambda
+    # creation time, so each AlgebraicDP closes over its own robot's specs.
     return AlgebraicDP(F, R, {
         "total_cost":   lambda f, cap=capacity, uc=c: (f["target_throughput"]/cap) * uc,
         "total_energy": lambda f, ek=e: f["target_range"] * ek * 24.0,
@@ -1573,6 +1747,8 @@ def make_dp(robot):
 
     ("md", "## The catalog (200 robot types)"),
     ("code", """def make_catalog(n=200, seed=42):
+    # Random robot specs in physically plausible ranges. Seeded for
+    # reproducibility across notebook runs.
     rng = random.Random(seed)
     out = []
     for i in range(n):
@@ -1581,7 +1757,11 @@ def make_dp(robot):
         out.append({"name": f"r{i:03d}",
                     "speed": s, "payload": p,
                     "unit_cost": c, "energy_per_km": e,
-                    "cost_per_capacity": c / (s * p)})  # monotone-friendly feature
+                    # Derived feature: total_cost is exactly proportional
+                    # to this scalar (T * cost_per_capacity), so it's a
+                    # genuinely monotone feature the MonotonicityEvaluator
+                    # can exploit aggressively.
+                    "cost_per_capacity": c / (s * p)})
     return out
 
 candidates = make_catalog()
@@ -1592,12 +1772,17 @@ print(f"{len(candidates)} candidate robot types")"""),
 
 Every catalog entry gets solved; we record the true Pareto front for reference.
 """),
-    ("code", """points = []
+    ("code", """# Run solve() on every candidate. With 200 entries this is the cost
+# we want the online learner to reduce.
+points = []
 for c in candidates:
     a = solve(make_dp(c), mission).antichain
     pt = dict(list(a.points)[0]); pt["name"] = c["name"]
     points.append(pt)
 
+# Compute the true Pareto front by brute force: a point is Pareto-optimal
+# if no other point dominates it (i.e., is <= in every R component and
+# strictly < in at least one).
 pareto = []
 for p in points:
     dominated = any(
@@ -1616,16 +1801,25 @@ for p in pareto:
 
 Each evaluator encodes a different prior belief about how candidate features relate to the inner-solve output.
 """),
-    ("code", """evs = [
+    ("code", """# Three evaluators with different structural assumptions.
+evs = [
+    # Lipschitz: bounded variation. Safest default; L tunes the trade-off
+    # between pruning aggressiveness and risk of missing a Pareto point.
     ("Lipschitz", LipschitzEvaluator(
         features=["speed", "payload", "unit_cost", "energy_per_km"],
         r_components=["total_cost", "total_energy"],
         L={"total_cost": 300.0, "total_energy": 30.0},
     )),
+    # Monotonicity on the derived feature: total_cost is exactly
+    # proportional to cost_per_capacity, so one observation prunes
+    # everything strictly worse in features.
     ("Monotonicity", MonotonicityEvaluator(
         features=["cost_per_capacity", "energy_per_km"],
         r_components=["total_cost", "total_energy"],
     )),
+    # LinearParametric: fits a running OLS regressor with a 3-sigma
+    # confidence band. min_obs=5 means it only starts bounding after
+    # five evaluations.
     ("LinearParametric", LinearParametricEvaluator(
         features=["speed", "payload", "unit_cost", "energy_per_km"],
         r_components=["total_cost", "total_energy"],
@@ -1634,6 +1828,9 @@ Each evaluator encodes a different prior belief about how candidate features rel
 ]
 results = []
 for name, ev in evs:
+    # solve_online prunes candidates by bound, then evaluates the most
+    # promising survivor via the standard solver. Loop until exhausted
+    # or budget hit (unset here, so unbounded).
     res = solve_online(make_dp, mission, candidates=candidates, evaluator=ev)
     results.append((name, res))
     print(f"{name:<18}: {res.n_evaluated:>3} evals, {res.n_eliminated:>3} eliminated, "
