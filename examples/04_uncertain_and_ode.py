@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from codesign import (
     AlgebraicDP,
-    NamedProduct,
+    Ports,
     ODE_DP,
     Reals,
     UncertainDP,
@@ -38,8 +38,8 @@ from codesign import (
 
 
 def battery_uncertainty_demo():
-    F = NamedProduct({"capacity": Reals(unit="J")})
-    R = NamedProduct({"mass": Reals(unit="kg")})
+    F = Ports({"capacity": Reals(unit="J")})
+    R = Ports({"mass": Reals(unit="kg")})
 
     # Pessimistic: assume only 1.6 MJ/kg (older cell chemistry).
     pessimistic = AlgebraicDP(
@@ -81,8 +81,8 @@ def battery_uncertainty_demo():
 
 
 def heater_demo():
-    F = NamedProduct({"delta_T": Reals(unit="K")})
-    R = NamedProduct({"power": Reals(unit="W")})
+    F = Ports({"delta_T": Reals(unit="K")})
+    R = Ports({"power": Reals(unit="W")})
 
     # Heat-loss coefficient h = 0.8 W/K.
     H_LOSS = 0.8

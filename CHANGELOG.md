@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Renamed `NamedProduct` to `Ports`** to match the library's everyday
+  vocabulary (port handles, outer F port, module R port, the operator
+  DSL is built on port handles). The old name is retained as a
+  backward-compatible alias (`NamedProduct = Ports`), so existing code
+  importing `NamedProduct` continues to work. All internal modules,
+  examples, notebooks, and documentation have been migrated to the new
+  name; the LaTeX manual now uses `Ports` throughout and explains the
+  alias.
+- Module-level docstrings in `codesign/posets.py` expanded with worked
+  rationale for each class and a clearer summary at the top.
+
 ### Added
 
 #### Online learning (compositional, elimination-based)
@@ -160,7 +172,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial release.
 
 ### Added
-- Posets: `Reals`, `Naturals`, `NamedProduct`, `Discrete`.
+- Posets: `Reals`, `Naturals`, `Ports`, `Discrete`.
 - `Antichain` with normalisation, `union_min`, `filter_above`.
 - Six DP primitives: `AlgebraicDP`, `FunctionDP`, `CatalogDP`, `ConstraintDP`,
   `ODE_DP`, `UncertainDP`.

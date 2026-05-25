@@ -27,7 +27,7 @@ from codesign import (
     Antichain,
     FunctionDP,
     Loop,
-    NamedProduct,
+    Ports,
     Reals,
     solve,
     minimize_cost,
@@ -51,15 +51,15 @@ def make_auv():
 
     # --- poset and DP definitions --------------------------------------
     # Loop axis 'design' bundles v and r; T, E, $ are the visible outputs.
-    Design = NamedProduct({
+    Design = Ports({
         "v": Reals(unit="m/s"),
         "r": Reals(unit="m"),
     })
-    F = NamedProduct({
+    F = Ports({
         "A": Reals(unit="m^2"),
         "design": Design,
     })
-    R = NamedProduct({
+    R = Ports({
         "design": Design,
         "T": Reals(unit="s"),
         "E": Reals(unit="J"),

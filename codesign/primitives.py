@@ -8,14 +8,14 @@ to glue diagrams together (Fig. 26, Fig. 35).
 from __future__ import annotations
 
 from .dp import AlgebraicDP
-from .posets import NamedProduct, Reals
+from .posets import Ports, Reals
 
 
 def adder(in_names: list[str], out_name: str, poset: Reals | None = None) -> AlgebraicDP:
     """Sum several scalar inputs into one scalar output."""
     p = poset or Reals()
-    F = NamedProduct({n: p for n in in_names})
-    R = NamedProduct({out_name: p})
+    F = Ports({n: p for n in in_names})
+    R = Ports({out_name: p})
     return AlgebraicDP(
         F=F,
         R=R,
@@ -29,8 +29,8 @@ def multiplier(
 ) -> AlgebraicDP:
     """Multiply two scalar inputs (e.g. current * voltage = power)."""
     p = poset or Reals()
-    F = NamedProduct({in_a: p, in_b: p})
-    R = NamedProduct({out_name: p})
+    F = Ports({in_a: p, in_b: p})
+    R = Ports({out_name: p})
     return AlgebraicDP(
         F=F,
         R=R,
@@ -42,8 +42,8 @@ def multiplier(
 def scale(in_name: str, out_name: str, factor: float, poset: Reals | None = None) -> AlgebraicDP:
     """Multiply by a constant (e.g. capacity * one_over_alpha = mass)."""
     p = poset or Reals()
-    F = NamedProduct({in_name: p})
-    R = NamedProduct({out_name: p})
+    F = Ports({in_name: p})
+    R = Ports({out_name: p})
     return AlgebraicDP(
         F=F,
         R=R,
@@ -55,8 +55,8 @@ def scale(in_name: str, out_name: str, factor: float, poset: Reals | None = None
 def constant(out_name: str, value: float, poset: Reals | None = None) -> AlgebraicDP:
     """A DP that ignores its (trivial) functionality and emits a constant."""
     p = poset or Reals()
-    F = NamedProduct({"_": p})
-    R = NamedProduct({out_name: p})
+    F = Ports({"_": p})
+    R = Ports({out_name: p})
     return AlgebraicDP(
         F=F,
         R=R,
@@ -68,8 +68,8 @@ def constant(out_name: str, value: float, poset: Reals | None = None) -> Algebra
 def identity(name: str, poset: Reals | None = None) -> AlgebraicDP:
     """Pass a single named scalar through unchanged."""
     p = poset or Reals()
-    F = NamedProduct({name: p})
-    R = NamedProduct({name: p})
+    F = Ports({name: p})
+    R = Ports({name: p})
     return AlgebraicDP(
         F=F,
         R=R,

@@ -24,7 +24,7 @@ import sys
 sys.path.insert(0, "/home/claude")
 
 from codesign import (
-    Reals, NamedProduct, FunctionDP, loop, solve,
+    Reals, Ports, FunctionDP, loop, solve,
 )
 
 
@@ -53,13 +53,13 @@ def drone_inner_h(f):
 
 
 def build_drone():
-    F = NamedProduct({
+    F = Ports({
         "endurance": Reals(unit="s"),
         "extra_payload": Reals(unit="kg"),
         "extra_power": Reals(unit="W"),
         "battery_mass": Reals(unit="kg"),
     })
-    R = NamedProduct({
+    R = Ports({
         "battery_mass": Reals(unit="kg"),
         "report_mass": Reals(unit="kg"),
     })

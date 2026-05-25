@@ -41,7 +41,7 @@ from typing import (
 )
 
 from .antichains import Antichain
-from .posets import NamedProduct, Poset
+from .posets import Ports, Poset
 
 
 # ===========================================================================
@@ -515,7 +515,7 @@ def solve_online(
     if incumbent is None:
         # Pathological: candidates list was empty.
         return OnlineResult(
-            antichain=Antichain.empty(NamedProduct({})),
+            antichain=Antichain.empty(Ports({})),
             n_evaluated=0, n_eliminated=0, n_candidates=0,
             history=history, evaluated_ids=evaluated_ids,
             eliminated_ids=eliminated_ids, incumbent_ids=incumbent_ids,

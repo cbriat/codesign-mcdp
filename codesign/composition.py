@@ -18,7 +18,7 @@ from typing import Mapping
 
 from .antichains import Antichain
 from .dp import DesignProblem
-from .posets import NamedProduct, Poset
+from .posets import Ports, Poset
 
 
 # ---------------------------------------------------------------------------
@@ -56,15 +56,15 @@ class Series(DesignProblem):
 class Parallel(DesignProblem):
     """Parallel composition: independent dp1 and dp2 stacked side by side.
 
-    F = F1 x F2 (NamedProduct concatenation), R = R1 x R2. The combined
+    F = F1 x F2 (Ports concatenation), R = R1 x R2. The combined
     antichain is the Cartesian product of individual antichains.
     """
 
     def __init__(self, dp1: DesignProblem, dp2: DesignProblem, name: str | None = None):
-        if not isinstance(dp1.F, NamedProduct) or not isinstance(dp2.F, NamedProduct):
-            raise TypeError("Parallel composition needs NamedProduct F on both sides")
-        if not isinstance(dp1.R, NamedProduct) or not isinstance(dp2.R, NamedProduct):
-            raise TypeError("Parallel composition needs NamedProduct R on both sides")
+        if not isinstance(dp1.F, Ports) or not isinstance(dp2.F, Ports):
+            raise TypeError("Parallel composition needs Ports F on both sides")
+        if not isinstance(dp1.R, Ports) or not isinstance(dp2.R, Ports):
+            raise TypeError("Parallel composition needs Ports R on both sides")
         f_overlap = set(dp1.F.keys()) & set(dp2.F.keys())
         r_overlap = set(dp1.R.keys()) & set(dp2.R.keys())
         if f_overlap:
@@ -73,8 +73,8 @@ class Parallel(DesignProblem):
             raise ValueError(f"resource names clash: {r_overlap}")
         self.dp1 = dp1
         self.dp2 = dp2
-        self.F = NamedProduct({**dp1.F.components, **dp2.F.components})
-        self.R = NamedProduct({**dp1.R.components, **dp2.R.components})
+        self.F = Ports({**dp1.F.components, **dp2.F.components})
+        self.R = Ports({**dp1.R.components, **dp2.R.components})
         self.name = name or f"par({dp1.name},{dp2.name})"
         self._f1_keys = set(dp1.F.keys())
         self._f2_keys = set(dp2.F.keys())
@@ -116,10 +116,10 @@ class Loop(DesignProblem):
         axis: str,
         name: str | None = None,
     ):
-        if not isinstance(inner.F, NamedProduct):
-            raise TypeError("Loop needs a NamedProduct functionality space")
-        if not isinstance(inner.R, NamedProduct):
-            raise TypeError("Loop needs a NamedProduct resource space")
+        if not isinstance(inner.F, Ports):
+            raise TypeError("Loop needs a Ports functionality space")
+        if not isinstance(inner.R, Ports):
+            raise TypeError("Loop needs a Ports resource space")
         if axis not in inner.F.components or axis not in inner.R.components:
             raise ValueError(
                 f"axis '{axis}' must appear in both F and R of the inner DP"
@@ -133,10 +133,10 @@ class Loop(DesignProblem):
             k: p for k, p in inner.R.components.items() if k != axis
         }
         if outer_F_components:
-            self.F = NamedProduct(outer_F_components)
+            self.F = Ports(outer_F_components)
         else:
             self.F = _Unit()
-        self.R = NamedProduct(outer_R_components) if outer_R_components else _Unit()
+        self.R = Ports(outer_R_components) if outer_R_components else _Unit()
         self.name = name or f"loop({inner.name}, axis={axis})"
 
     def h(self, f_outer) -> Antichain:

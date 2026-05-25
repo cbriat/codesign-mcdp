@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, "/home/claude")
 
 from codesign import (
-    Reals, Naturals, NamedProduct,
+    Reals, Naturals, Ports,
     Antichain,
     AlgebraicDP, FunctionDP, CatalogDP, CatalogEntry,
     series, par, loop,
@@ -23,7 +23,7 @@ def test_posets():
     assert r.is_top(float("inf"))
     print(f"Reals format: {r.format(1.5)}, top: {r.format(r.top())}")
 
-    np_p = NamedProduct({"a": Reals(), "b": Reals()})
+    np_p = Ports({"a": Reals(), "b": Reals()})
     x = np_p.make(a=1.0, b=2.0)
     y = np_p.make(a=1.5, b=2.5)
     z = np_p.make(a=1.5, b=1.0)
@@ -35,7 +35,7 @@ def test_posets():
 
 def test_antichain():
     print("\n=== Antichains ===")
-    p = NamedProduct({"cost": Reals(), "weight": Reals()})
+    p = Ports({"cost": Reals(), "weight": Reals()})
     pts = [
         {"cost": 100.0, "weight": 200.0},
         {"cost": 200.0, "weight": 100.0},
@@ -49,8 +49,8 @@ def test_antichain():
 
 def test_algebraic_dp():
     print("\n=== AlgebraicDP ===")
-    F = NamedProduct({"capacity": Reals(unit="J")})
-    R = NamedProduct({"mass": Reals(unit="kg")})
+    F = Ports({"capacity": Reals(unit="J")})
+    R = Ports({"mass": Reals(unit="kg")})
     battery = AlgebraicDP(F, R, {"mass": lambda f: f["capacity"] / 1.8e6})
     res = solve(battery, {"capacity": 3.6e6})
     print(f"Battery for 3.6 MJ: {res.antichain}")
@@ -60,8 +60,8 @@ def test_algebraic_dp():
 
 def test_catalog_dp():
     print("\n=== CatalogDP ===")
-    F = NamedProduct({"torque": Reals(), "speed": Reals()})
-    R = NamedProduct({"cost": Reals(), "weight": Reals()})
+    F = Ports({"torque": Reals(), "speed": Reals()})
+    R = Ports({"cost": Reals(), "weight": Reals()})
     catalog = [
         CatalogEntry(provides={"torque": 1.0, "speed": 100.0}, costs={"cost": 50.0, "weight": 100.0}, name="m1"),
         CatalogEntry(provides={"torque": 2.0, "speed": 150.0}, costs={"cost": 90.0, "weight": 200.0}, name="m2"),
@@ -76,12 +76,12 @@ def test_catalog_dp():
 
 def test_series():
     print("\n=== Series composition ===")
-    F1 = NamedProduct({"capacity": Reals()})
-    R1 = NamedProduct({"mass": Reals()})
+    F1 = Ports({"capacity": Reals()})
+    R1 = Ports({"mass": Reals()})
     battery = AlgebraicDP(F1, R1, {"mass": lambda f: f["capacity"] / 1.8e6})
 
-    F2 = NamedProduct({"mass": Reals()})
-    R2 = NamedProduct({"cost": Reals()})
+    F2 = Ports({"mass": Reals()})
+    R2 = Ports({"cost": Reals()})
     pricing = AlgebraicDP(F2, R2, {"cost": lambda f: f["mass"] * 10.0})
 
     chain = series(battery, pricing)
@@ -91,12 +91,12 @@ def test_series():
 
 def test_parallel():
     print("\n=== Parallel composition ===")
-    F1 = NamedProduct({"capacity": Reals()})
-    R1 = NamedProduct({"mass": Reals()})
+    F1 = Ports({"capacity": Reals()})
+    R1 = Ports({"mass": Reals()})
     battery = AlgebraicDP(F1, R1, {"mass": lambda f: f["capacity"] / 1.8e6})
 
-    F2 = NamedProduct({"lift": Reals()})
-    R2 = NamedProduct({"power": Reals()})
+    F2 = Ports({"lift": Reals()})
+    R2 = Ports({"power": Reals()})
     actuator = AlgebraicDP(F2, R2, {"power": lambda f: 10.0 * f["lift"] ** 2})
 
     combo = par(battery, actuator)
@@ -108,8 +108,8 @@ def test_loop_simple():
     print("\n=== Simple loop ===")
     # f -> r where r = 2*sqrt(f) + 1, then close r <= f.
     # Fixed-point: c = 2*sqrt(c) + 1, which gives c = 3 + 2*sqrt(2) ~ 5.83.
-    F = NamedProduct({"capacity": Reals()})
-    R = NamedProduct({"capacity": Reals()})
+    F = Ports({"capacity": Reals()})
+    R = Ports({"capacity": Reals()})
 
     def h_fn(f):
         c = f["capacity"]
@@ -129,14 +129,14 @@ def test_system():
     """
     print("\n=== System (modular composition) ===")
     producer = AlgebraicDP(
-        F=NamedProduct({"in": Reals()}),
-        R=NamedProduct({"out": Reals()}),
+        F=Ports({"in": Reals()}),
+        R=Ports({"out": Reals()}),
         equations={"out": lambda f: 0.5 * f["in"] + 1.0},
         name="producer",
     )
     consumer = AlgebraicDP(
-        F=NamedProduct({"need": Reals()}),
-        R=NamedProduct({"cost": Reals()}),
+        F=Ports({"need": Reals()}),
+        R=Ports({"cost": Reals()}),
         equations={"cost": lambda f: f["need"]},
         name="consumer",
     )
@@ -498,7 +498,7 @@ def test_viz_smoke():
     print("\n=== Visualisation smoke ===")
     from codesign import viz
     from codesign.antichains import Antichain
-    from codesign.posets import NamedProduct
+    from codesign.posets import Ports
 
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
@@ -549,7 +549,7 @@ def test_viz_smoke():
     plt.close()
 
     # plot_antichain on a handcrafted 2D antichain
-    R = NamedProduct({"cost": Reals(), "weight": Reals()})
+    R = Ports({"cost": Reals(), "weight": Reals()})
     pts = [{"cost": 100, "weight": 5},
            {"cost": 80,  "weight": 8},
            {"cost": 60,  "weight": 12}]
@@ -571,8 +571,8 @@ def test_online_solver():
     print("\n=== Online elimination solver ===")
     import math, random
 
-    F = NamedProduct({"target_throughput": Reals(unit="pkg/h")})
-    R = NamedProduct({"total_cost": Reals(unit="USD")})
+    F = Ports({"target_throughput": Reals(unit="pkg/h")})
+    R = Ports({"total_cost": Reals(unit="USD")})
 
     def make_dp(robot):
         cap = robot["speed"] * robot["payload"]

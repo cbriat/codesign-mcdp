@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, List, Mapping, Sequence
 
 from .antichains import Antichain
-from .posets import NamedProduct, Poset, Reals
+from .posets import Ports, Poset, Reals
 
 
 class DesignProblem(ABC):
@@ -62,8 +62,8 @@ class AlgebraicDP(DesignProblem):
         equations: Mapping[str, Callable[[Mapping[str, Any]], Any]],
         name: str = "algebraic",
     ):
-        if not isinstance(R, NamedProduct):
-            raise TypeError("AlgebraicDP requires R to be a NamedProduct")
+        if not isinstance(R, Ports):
+            raise TypeError("AlgebraicDP requires R to be a Ports")
         missing = set(R.keys()) - set(equations)
         if missing:
             raise ValueError(f"missing equations for resources: {missing}")
@@ -141,13 +141,13 @@ class CatalogDP(DesignProblem):
 
     def __init__(
         self,
-        F: NamedProduct,
-        R: NamedProduct,
+        F: Ports,
+        R: Ports,
         catalog: Sequence,
         name: str = "catalog",
     ):
-        if not isinstance(F, NamedProduct) or not isinstance(R, NamedProduct):
-            raise TypeError("CatalogDP requires NamedProduct F and R")
+        if not isinstance(F, Ports) or not isinstance(R, Ports):
+            raise TypeError("CatalogDP requires Ports F and R")
         self.F = F
         self.R = R
         self.name = name
@@ -189,7 +189,7 @@ class ConstraintDP(DesignProblem):
     def __init__(
         self,
         F: Poset,
-        R: NamedProduct,
+        R: Ports,
         sampler: Callable[[Any], Iterable[Any]],
         feasible: Callable[[Any, Any], bool],
         cost: Callable[[Any], Mapping[str, Any]],
@@ -228,7 +228,7 @@ class ODE_DP(DesignProblem):
     def __init__(
         self,
         F: Poset,
-        R: NamedProduct,
+        R: Ports,
         rhs: Callable[[Any, float, Any], Any],
         extract: Callable[[Any], Mapping[str, Any]],
         mode: str = "final_value",

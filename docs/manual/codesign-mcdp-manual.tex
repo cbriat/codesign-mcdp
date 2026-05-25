@@ -377,12 +377,20 @@ with $+\infty$. Bottom is $0.0$; top is \texttt{math.inf}. The optional
 \paragraph{\texttt{Naturals(unit="")}.} The non-negative integers
 augmented with $+\infty$. Bottom is $0$; top is \texttt{math.inf}.
 
-\paragraph{\texttt{NamedProduct(components: dict[str, Poset])}.}
+\paragraph{\texttt{Ports(components: dict[str, Poset])}.}
 The componentwise-ordered product of named factor posets. Elements
 are Python dicts mapping component names to values. The bottom is the
 dict of all bottoms; the top is the dict of all tops.
-\texttt{NamedProduct} can be nested freely: a component poset may
-itself be a \texttt{NamedProduct}.
+\texttt{Ports} can be nested freely: a component poset may
+itself be a \texttt{Ports}. This is the type used for every design
+problem's $F$ and $R$.
+
+The name reflects the library's vocabulary: each named component is
+a \emph{port} of the design problem, addressable by name in the
+constraint DSL. For backward compatibility the older name
+\texttt{NamedProduct} remains exported as an alias, so existing code
+that imports \texttt{NamedProduct} continues to work; new code should
+prefer \texttt{Ports}.
 
 \paragraph{\texttt{Discrete(elements, leq=None)}.} A finite poset with
 explicit element set and a caller-supplied \texttt{leq} predicate.
@@ -439,8 +447,8 @@ of the functionality.
 
 \begin{lstlisting}
 AlgebraicDP(
-    F: NamedProduct,
-    R: NamedProduct,
+    F: Ports,
+    R: Ports,
     equations: dict[str, Callable[[dict], float]],
     name: str = "algebraic",
 )
@@ -454,8 +462,8 @@ callable taking a functionality dict and returning a scalar.
 A battery sized by specific energy:
 \begin{lstlisting}
 battery = AlgebraicDP(
-    F=NamedProduct({"capacity": Reals(unit="J")}),
-    R=NamedProduct({"mass": Reals(unit="kg")}),
+    F=Ports({"capacity": Reals(unit="J")}),
+    R=Ports({"mass": Reals(unit="kg")}),
     equations={"mass": lambda f: f["capacity"] / 1.8e6},
 )
 \end{lstlisting}
@@ -469,12 +477,34 @@ relation is multi-valued (a true Pareto front) or has branching logic.
 
 \begin{lstlisting}
 FunctionDP(
-    F: NamedProduct,
-    R: NamedProduct,
+    F: Ports,
+    R: Ports,
     h_fn: Callable[[dict], Antichain],
     name: str = "function",
 )
 \end{lstlisting}
+
+\begin{example}[A two-option amplifier]
+The same audio amplifier output spec admits two implementations: a
+class-A topology (clean, hot) or a class-D topology (efficient, harsh).
+\texttt{h(f)} emits both points, so the engineer sees the real
+tradeoff:
+\begin{lstlisting}
+def h_amp(f):
+    watts = f["watts"]
+    return Antichain.from_set(R, [
+        {"power_in": watts / 0.25, "thd": 0.001},   # class-A
+        {"power_in": watts / 0.90, "thd": 0.020},   # class-D
+    ])
+
+amp = FunctionDP(
+    F=Ports({"watts":    Reals(unit="W")}),
+    R=Ports({"power_in": Reals(unit="W"),
+                    "thd":      Reals()}),
+    h_fn=h_amp,
+)
+\end{lstlisting}
+\end{example}
 
 \subsection{\texttt{CatalogDP}}
 
@@ -483,8 +513,8 @@ batteries, sensors).
 
 \begin{lstlisting}
 CatalogDP(
-    F: NamedProduct,
-    R: NamedProduct,
+    F: Ports,
+    R: Ports,
     catalog: list[CatalogEntry],
     name: str = "catalog",
 )
@@ -496,10 +526,35 @@ CatalogEntry(
 )
 \end{lstlisting}
 
-For a request $f$, $h(f)$ is the antichain of $\texttt{entry.costs}$
+For a request $f$, $h(f)$ is the antichain of \texttt{entry.costs}
 for every entry whose \texttt{provides} dominates $f$ in $F$. Entries
 that are dominated by another feasible entry are pruned by $\Min$ in
 $R$.
+
+\begin{example}[A small motor catalog]
+Three motors with incomparable mass--cost tradeoffs at the same
+torque rating. \texttt{h} returns whichever entries cover the
+requested torque, then $\Min$ drops dominated ones automatically:
+\begin{lstlisting}
+motor = CatalogDP(
+    F=Ports({"torque": Reals(unit="N*m")}),
+    R=Ports({"mass":   Reals(unit="kg"),
+                    "cost":   Reals(unit="USD")}),
+    catalog=[
+        CatalogEntry(name="Tiny",   provides={"torque": 2.0},
+                     costs={"mass": 0.2, "cost": 30.0}),
+        CatalogEntry(name="Light",  provides={"torque": 8.0},
+                     costs={"mass": 0.5, "cost": 200.0}),
+        CatalogEntry(name="Heavy",  provides={"torque": 8.0},
+                     costs={"mass": 0.8, "cost": 120.0}),
+    ],
+)
+# motor.h({"torque": 7.0}) yields the antichain
+# Antichain[(mass=0.5, cost=200), (mass=0.8, cost=120)]
+\end{lstlisting}
+The Tiny entry is filtered out (does not cover 7\,N$\cdot$m). Light
+and Heavy are mutually incomparable, so both survive the $\Min$.
+\end{example}
 
 \subsection{\texttt{ConstraintDP}}
 
@@ -509,8 +564,8 @@ as \emph{is this choice good enough, and how much does it cost?}.
 
 \begin{lstlisting}
 ConstraintDP(
-    F: NamedProduct,
-    R: NamedProduct,
+    F: Ports,
+    R: Ports,
     sampler: Callable[[dict], Iterable[dict]],
     feasible: Callable[[dict, dict], bool],
     cost: Callable[[dict, dict], dict],
@@ -538,8 +593,8 @@ steady-state value.
 
 \begin{lstlisting}
 ODE_DP(
-    F: NamedProduct,
-    R: NamedProduct,
+    F: Ports,
+    R: Ports,
     rhs: Callable,
     extract: Callable[[state], dict],
     mode: str,            # "final_value" or "steady_state"
@@ -550,6 +605,31 @@ ODE_DP(
 )
 \end{lstlisting}
 
+\begin{example}[A heater at thermal steady state]
+A wall heater whose steady-state input power is recovered from
+Newton's law of cooling, $\dot T = (P - k(T - T_\infty))/C$. The
+heater's resource is the electrical power required to hold the
+target temperature:
+\begin{lstlisting}
+def rhs(state, t, f):
+    T = state["T"]
+    k, T_inf, C = 0.5, 20.0, 1000.0
+    return {"T": (f["power_in"] - k * (T - T_inf)) / C}
+
+heater = ODE_DP(
+    F=Ports({"target_T":  Reals(unit="C"),
+                    "power_in":  Reals(unit="W")}),
+    R=Ports({"steady_T":  Reals(unit="C")}),
+    rhs=rhs,
+    extract=lambda state: {"steady_T": state["T"]},
+    mode="steady_state",
+    x0_fn=lambda f: {"T": 20.0},
+)
+\end{lstlisting}
+At steady state Newton iteration finds $T = T_\infty + P/k$, which
+is recovered exactly by the solver.
+\end{example}
+
 \subsection{\texttt{UncertainDP}}
 
 Brackets an unknown $h$ with a known lower and upper bound. The
@@ -559,8 +639,8 @@ bound. Section~VII of Censi (2015) develops the theory.
 
 \begin{lstlisting}
 UncertainDP(
-    F: NamedProduct,
-    R: NamedProduct,
+    F: Ports,
+    R: Ports,
     lower: DesignProblem,
     upper: DesignProblem,
     mode: str = "upper",
@@ -570,6 +650,27 @@ UncertainDP(
 
 \texttt{with\_mode("lower" | "upper")} returns the bracket selected
 for solving.
+
+\begin{example}[A battery with uncertain specific energy]
+Specific energy of the cell chemistry is known only to lie in
+$[1.6, 2.0]$\,MJ/kg. The optimistic and pessimistic brackets give
+lower and upper bounds on the required mass:
+\begin{lstlisting}
+F = Ports({"capacity": Reals(unit="J")})
+R = Ports({"mass":     Reals(unit="kg")})
+
+lo = AlgebraicDP(F, R, {"mass": lambda f: f["capacity"] / 2.0e6})
+hi = AlgebraicDP(F, R, {"mass": lambda f: f["capacity"] / 1.6e6})
+
+battery = UncertainDP(F, R, lower=lo, upper=hi)
+
+# Solve both brackets and report the interval.
+m_opt  = solve(battery.with_mode("lower"), {"capacity": 3.6e6})
+m_pess = solve(battery.with_mode("upper"), {"capacity": 3.6e6})
+# m_opt  -> Antichain[(mass=1.80 kg)]
+# m_pess -> Antichain[(mass=2.25 kg)]
+\end{lstlisting}
+\end{example}
 
 % ===========================================================================
 \section{Composition Operators}
@@ -587,6 +688,26 @@ Requires \texttt{dp1.R == dp2.F} structurally (same component names
 and posets). Implements the series definition: for each point of
 $h_1(f)$ run $h_2$ and take the union $\Min$.
 
+\begin{example}[Battery feeding an actuator]
+A battery converts energy demand into mass; the actuator converts
+that mass demand into a power draw. Series composition feeds the
+battery's output directly into the actuator's input:
+\begin{lstlisting}
+battery = AlgebraicDP(
+    F=Ports({"capacity": Reals(unit="J")}),
+    R=Ports({"mass":     Reals(unit="kg")}),
+    equations={"mass": lambda f: f["capacity"] / 1.8e6},
+)
+actuator = AlgebraicDP(
+    F=Ports({"mass":     Reals(unit="kg")}),
+    R=Ports({"power":    Reals(unit="W")}),
+    equations={"power": lambda f: 10.0 * f["mass"] ** 2},
+)
+chain = series(battery, actuator)
+# solve(chain, {"capacity": 3.6e6}) maps energy -> power directly.
+\end{lstlisting}
+\end{example}
+
 \subsection{Parallel}
 
 \begin{lstlisting}
@@ -596,8 +717,30 @@ Parallel(dp1, dp2)
 
 Requires non-overlapping component names in $F_1, F_2$ and in
 $R_1, R_2$. The output $F$ and $R$ are the concatenated
-\texttt{NamedProduct}s. The antichain is the Cartesian product
+\texttt{Ports}s. The antichain is the Cartesian product
 followed by $\Min$.
+
+\begin{example}[Two independent subsystems]
+A drone has a propulsion subsystem (energy in $\to$ mass out) and a
+sensing subsystem (sample rate in $\to$ power out). They share no
+ports and run in parallel; the composite DP takes both inputs and
+emits both outputs:
+\begin{lstlisting}
+propulsion = AlgebraicDP(
+    F=Ports({"energy":      Reals(unit="J")}),
+    R=Ports({"prop_mass":   Reals(unit="kg")}),
+    equations={"prop_mass": lambda f: f["energy"] / 1.8e6},
+)
+sensor = AlgebraicDP(
+    F=Ports({"sample_rate": Reals(unit="Hz")}),
+    R=Ports({"sensor_pwr":  Reals(unit="W")}),
+    equations={"sensor_pwr": lambda f: 0.05 * f["sample_rate"]},
+)
+combined = par(propulsion, sensor)
+# combined.F has both energy and sample_rate;
+# combined.R has both prop_mass and sensor_pwr.
+\end{lstlisting}
+\end{example}
 
 \subsection{Loop}
 \label{sec:loop}
@@ -612,6 +755,29 @@ both \texttt{inner.F} and \texttt{inner.R}. The resulting DP has
 \texttt{F = inner.F} minus the axis and \texttt{R = inner.R} minus
 the axis. Calling \texttt{h(f)} triggers the Kleene fixed-point
 iteration described in Theorem~\ref{thm:kleene}.
+
+\begin{example}[Battery mass feedback]
+A drone's battery must carry both the payload \emph{and} its own
+mass. Closing the loop on \texttt{battery\_mass} converts the
+self-referential inequality into a fixed-point problem that the
+Kleene solver handles automatically:
+\begin{lstlisting}
+inner = AlgebraicDP(
+    F=Ports({"payload":       Reals(unit="kg"),
+                    "battery_mass":  Reals(unit="kg")}),
+    R=Ports({"battery_mass":  Reals(unit="kg")}),
+    equations={
+        "battery_mass":
+            lambda f: 0.5 * (f["payload"] + f["battery_mass"]),
+    },
+)
+drone = loop(inner, axis="battery_mass")
+# drone.F = {"payload"}, drone.R = {}
+# solve(drone, {"payload": 1.0}) iterates to the fixed point.
+\end{lstlisting}
+The closed-form solution is $m^\star = p / (1 - 0.5) = 2p$, which
+the Kleene iteration recovers in a handful of steps.
+\end{example}
 
 \begin{remark}[Multiple feedback loops]
 \texttt{Loop} closes one axis at a time. To close several loops,
@@ -648,6 +814,27 @@ class SolveResult:
     feasible: bool            # True if antichain has finite, nonempty points
     trace: list[Antichain]    # the sequence A_0, A_1, ... if recorded
 \end{lstlisting}
+
+\begin{example}[Inspecting a solve result]
+The full lifecycle of a solve: build the DP, call \texttt{solve},
+introspect the result, and pick a single design with
+\texttt{minimize\_cost}:
+\begin{lstlisting}
+result = solve(drone, {"endurance":      300.0,
+                       "extra_payload":  0.5,
+                       "extra_power":    5.0},
+               max_iter=200, trace=True)
+
+print(result.status)         # "converged"
+print(result.iterations)     # e.g. 17
+print(result.feasible)       # True
+print(result.antichain)      # Antichain[(total_mass=0.56 kg)]
+
+# Scalarise: cheapest design under a custom cost function
+best = minimize_cost(result, cost_fn=lambda r: r["total_mass"])
+print(best)                  # {"total_mass": 0.5602}
+\end{lstlisting}
+\end{example}
 
 \subsection{The Kleene iteration}
 
@@ -758,6 +945,39 @@ def log_every_5(entry):
 
 solve(dp, f, on_iteration=log_every_5)
 \end{lstlisting}
+
+\begin{example}[Warm-starting a parameter sweep]
+When sweeping a parameter (load, mission length, demand level), the
+fixed point at one parameter is a great seed for the next. Pass the
+previous \texttt{SolveResult} (or its \texttt{antichain}) via
+\texttt{start\_from=} and the Kleene iteration picks up from there
+instead of restarting at $\bot$:
+\begin{lstlisting}
+prev = None
+results = []
+for L in np.linspace(5.0, 30.0, 50):
+    r = solve(dp, {"daily_load_kwh": float(L), ...},
+              max_iter=400, start_from=prev)
+    results.append(r)
+    prev = r            # reuse the converged inner antichain
+\end{lstlisting}
+For the microgrid example (notebook~13) this reduces the cumulative
+iteration count by roughly 10\,\% across the sweep, more for finer
+parameter grids.
+\end{example}
+
+\begin{example}[Plotting convergence after a trace]
+With \texttt{trace=True}, the result carries the entire iteration
+history; a single \texttt{viz.plot\_convergence} call renders the
+delta-vs-iteration semilog:
+\begin{lstlisting}
+from codesign import viz
+
+r = solve(drone, f, trace=True, max_iter=200)
+ax = viz.plot_convergence(r)
+ax.set_title(f"converged in {r.iterations} steps")
+\end{lstlisting}
+\end{example}
 
 % ===========================================================================
 \section{Uncertainty}
@@ -916,6 +1136,50 @@ which separates the four standard ways of reporting an answer "under
 uncertainty." Notebooks 11 and 12 visualise this for the
 example-7 drone.
 
+\begin{example}[Box worst-case of a drone battery]
+Specific energy and efficiency of the battery cell live in declared
+ranges, each with a direction of badness. The worst-case mass is
+the corner where both parameters take their worst endpoint:
+\begin{lstlisting}
+bat = Battery()  # the Module subclass from example~7
+bat.uncertain_set = Box(
+    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
+    efficiency=(0.80, 0.90, "more_is_better"),
+)
+# ... wire `bat` into the drone system ...
+
+result = solve(drone, f, uncertainty=["worst_case"])
+worst_mass = list(result.worst_case.antichain.points)[0]["total_mass"]
+# worst_mass = 0.5760 kg, versus 0.5602 kg nominal
+\end{lstlisting}
+\end{example}
+
+\begin{example}[Monte Carlo with a Gaussian copula]
+The same battery, now with stochastic specific energy and
+efficiency, correlated at $\rho = 0.4$. One \texttt{solve} call
+returns all four summary statistics:
+\begin{lstlisting}
+from scipy import stats
+
+bat.uncertain_dist = Stochastic(
+    marginals={
+        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
+        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+    },
+    copula=GaussianCopula(correlation=[[1.0, 0.4],
+                                        [0.4, 1.0]]),
+)
+
+res = solve(drone, f,
+            uncertainty=["mean", "p95", "cvar95", "samples"],
+            n_samples=1000, rng_seed=42)
+# res.mean["total_mass"]    -> 0.5614 kg
+# res.p95["total_mass"]     -> 0.5729 kg
+# res.cvar95["total_mass"]  -> 0.5742 kg
+# len(res.samples)          -> 1000
+\end{lstlisting}
+\end{example}
+
 % ===========================================================================
 \section{Online Learning}
 \label{sec:online-learning}
@@ -1013,6 +1277,42 @@ The returned \texttt{OnlineResult} exposes:
   \texttt{\{pick, antichain, remaining, evaluated, eliminated\}}.
 \end{description}
 
+\begin{example}[Fleet sizing across 200 robot types]
+A logistics service has a 200-entry catalogue of candidate robot
+types, each described by four features. The Lipschitz evaluator
+caps how fast the inner-solve output can change with the features,
+so a single observation tightens the bound on every other candidate.
+With the right L the answer is exact:
+\begin{lstlisting}
+def candidate_fn(robot):
+    capacity = robot["speed"] * robot["payload"]
+    return AlgebraicDP(F, R, {
+        "total_cost":   lambda f, cap=capacity, uc=robot["unit_cost"]:
+                        (f["target_throughput"] / cap) * uc,
+        "total_energy": lambda f, ek=robot["energy_per_km"]:
+                        f["target_range"] * ek * 24.0,
+    })
+
+ev = LipschitzEvaluator(
+    features=["speed", "payload", "unit_cost", "energy_per_km"],
+    r_components=["total_cost", "total_energy"],
+    L={"total_cost": 300.0, "total_energy": 30.0},
+)
+
+result = solve_online(
+    candidate_fn, mission,
+    candidates=robot_catalog,        # list of 200 feature dicts
+    evaluator=ev,
+)
+# result.n_evaluated   = 192 / 200
+# result.n_eliminated  = 8
+# result.antichain     = 5 Pareto-optimal robot types
+\end{lstlisting}
+Swapping in \texttt{MonotonicityEvaluator(features=["cost\_per\_capacity",\
+\ "energy\_per\_km"], ...)} cuts the evaluation count to about 13 by
+exploiting the structural monotonicity of the derived feature.
+\end{example}
+
 % ===========================================================================
 \section{Visualisation}
 \label{sec:visualisation}
@@ -1044,6 +1344,50 @@ All four accept an optional \texttt{ax=...} argument so they compose
 into larger figures. The module is imported as
 \texttt{from codesign import viz}.
 
+\begin{example}[Pareto front of a vehicle co-design]
+The vehicle from worked example~8 has two Pareto-incomparable
+designs at the Small-parcel mission. A single call paints them on a
+mass--cost plane and shades the dominated quadrants so the front is
+visible at a glance:
+\begin{lstlisting}
+from codesign import viz
+import matplotlib.pyplot as plt
+
+result = solve(vehicle, {"payload": 2.0, "mission_energy": 2.0e5})
+viz.plot_antichain(result, axes=["total_mass", "total_cost"])
+plt.show()
+\end{lstlisting}
+For three resources, pass three axis names to get a 3D scatter.
+\end{example}
+
+\begin{example}[Uncertainty histogram with summaries]
+Visualising the Monte Carlo output of a stochastic solve: the
+histogram of total mass across MC samples, with the nominal, mean,
+p95, and CVaR95 each drawn as a vertical line:
+\begin{lstlisting}
+res = solve(drone, f,
+            uncertainty=["mean", "p95", "cvar95", "samples"],
+            n_samples=1000, rng_seed=42)
+ax = viz.plot_uncertainty(res, port="total_mass",
+                          nominal=0.5602, bins=30)
+\end{lstlisting}
+The function reads the requested summaries off the result and
+labels them automatically.
+\end{example}
+
+\begin{example}[System graph in GraphViz dot]
+For documentation or for understanding someone else's model, the
+constraint graph of a built \texttt{System} can be dumped as dot:
+\begin{lstlisting}
+dot = viz.to_dot(microgrid, name="microgrid")
+# Render externally:
+# echo "<dot output>" | dot -Tpng > microgrid.png
+\end{lstlisting}
+Modules become boxes, outer F ports become source rectangles,
+outer R ports become sink rectangles, and constraint connections
+become directed edges labelled with the linking expression.
+\end{example}
+
 % ===========================================================================
 \section{The MCDP Builder}
 \label{sec:mcdp-builder}
@@ -1073,6 +1417,30 @@ internally, then wraps it in \texttt{Loop}s as requested by
 target are joined (max). Mostly useful when the model has a small
 number of variables and reads naturally as a list of $\geq$
 inequalities, mirroring the paper's \texttt{mcdp \{ ... \}} blocks.
+
+\begin{example}[Drone as a single MCDP block]
+The Fig.~48 drone rewritten as a flat MCDP, with one closed loop on
+\texttt{battery\_mass}:
+\begin{lstlisting}
+with MCDP("drone") as m:
+    m.provides("endurance",     unit="s")
+    m.provides("extra_payload", unit="kg")
+    m.provides("extra_power",   unit="W")
+    m.requires("battery_mass",  unit="kg")
+
+    m.constraint("battery_mass", lambda f:
+        (f["extra_power"] + 10.0 * (9.81 * (f["battery_mass"]
+                                            + f["extra_payload"])) ** 2)
+        * f["endurance"] / 1.8e6
+    )
+    m.loop_on("battery_mass")
+
+drone = m.build()
+\end{lstlisting}
+Calling \texttt{solve(drone, \{"endurance": 300.0, ...\})} runs the
+same Kleene iteration the worked example~1 uses, returning the same
+\texttt{battery\_mass = 0.49 kg} fixed point.
+\end{example}
 
 % ===========================================================================
 \section{The System Builder}
@@ -1193,6 +1561,35 @@ and calling \texttt{super().\_\_init\_\_()} after setting any
 instance attributes. \texttt{h} may return a dict (treated as a
 singleton antichain), a list of dicts (multi-valued antichain), or
 an \texttt{Antichain} directly.
+
+\begin{example}[A modular drone end-to-end]
+The drone from worked example~7, built with the operator-overloaded
+constraint syntax. Each line below a \texttt{System} declaration is
+a textbook inequality:
+\begin{lstlisting}
+sys = System("drone")
+endurance     = sys.provides("endurance",     unit="s")
+extra_payload = sys.provides("extra_payload", unit="kg")
+extra_power   = sys.provides("extra_power",   unit="W")
+total_mass    = sys.requires("total_mass",    unit="kg")
+
+b = sys.add("battery",  Battery())
+a = sys.add("actuator", Actuator())
+
+b.capacity   >= (a.power + extra_power) * endurance
+a.lift_force >= 9.81 * (b.mass + extra_payload)
+total_mass   >= b.mass + extra_payload
+
+drone = sys.build()
+r = solve(drone, {"endurance": 300.0,
+                  "extra_payload": 0.5,
+                  "extra_power": 5.0})
+# r.antichain -> Antichain[(total_mass=0.56 kg)]
+\end{lstlisting}
+\texttt{build()} bundles every subsystem's R into a single Kleene
+axis and closes the loop automatically. The constraint graph can
+be exported with \texttt{viz.to\_dot(drone)} for documentation.
+\end{example}
 
 \subsection{Semantics}
 
@@ -1399,7 +1796,7 @@ optimistic-evaluator bound. The example compares three flavours:
   evaluates roughly 190 / 200 candidates but provably recovers all
   Pareto-optimal types.
 \item Monotonicity on a derived
-  \texttt{cost\_per\_capacity = unit\_cost / (speed \cdot payload)}
+  \texttt{cost\_per\_capacity = unit\_cost / (speed * payload)}
   feature evaluates only 13 / 200 candidates and still recovers
   every Pareto point.
 \item Linear-parametric with a 3-sigma confidence band evaluates
@@ -1496,7 +1893,7 @@ The public API exported by \texttt{import codesign} is summarised
 below.
 
 \paragraph{Posets.}
-\texttt{Reals}, \texttt{Naturals}, \texttt{NamedProduct},
+\texttt{Reals}, \texttt{Naturals}, \texttt{Ports},
 \texttt{Discrete}, abstract base \texttt{Poset}.
 
 \paragraph{Antichains.}

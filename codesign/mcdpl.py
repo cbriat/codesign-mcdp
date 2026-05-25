@@ -43,7 +43,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from .antichains import Antichain
 from .composition import Loop
 from .dp import AlgebraicDP, DesignProblem, FunctionDP
-from .posets import NamedProduct, Reals
+from .posets import Ports, Reals
 
 
 class MCDP:
@@ -131,8 +131,8 @@ class MCDP:
         if not self._requires:
             raise ValueError("at least one requires() is required")
 
-        F = NamedProduct(dict(self._provides))
-        R = NamedProduct(dict(self._requires))
+        F = Ports(dict(self._provides))
+        R = Ports(dict(self._requires))
 
         if self._rule is not None:
             inner: DesignProblem = FunctionDP(

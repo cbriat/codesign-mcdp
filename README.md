@@ -41,10 +41,10 @@ A battery: given a required capacity, the minimal mass is capacity divided by
 specific energy (1.8 MJ/kg for Li-ion).
 
 ```python
-from codesign import Reals, NamedProduct, AlgebraicDP, solve
+from codesign import Reals, Ports, AlgebraicDP, solve
 
-F = NamedProduct({"capacity": Reals(unit="J")})
-R = NamedProduct({"mass": Reals(unit="kg")})
+F = Ports({"capacity": Reals(unit="J")})
+R = Ports({"mass": Reals(unit="kg")})
 
 battery = AlgebraicDP(
     F=F, R=R,
@@ -460,7 +460,7 @@ A few patterns that come up repeatedly:
 
 ```
 codesign/
-  posets.py        Reals, Naturals, NamedProduct, Discrete
+  posets.py        Reals, Naturals, Ports, Discrete
   antichains.py    Antichain: normalised, Min-closed, with union_min and filter_above
   dp.py            DesignProblem, AlgebraicDP, FunctionDP, CatalogDP, ConstraintDP, ODE_DP, UncertainDP
   composition.py   Series, Parallel, Loop  (and series, par, loop aliases)

@@ -28,7 +28,7 @@ from codesign import (
     Antichain,
     FunctionDP,
     Loop,
-    NamedProduct,
+    Ports,
     Naturals,
     SolveResult,
     solve,
@@ -41,8 +41,8 @@ def make_problem():
 
     # Inner DP: functionality is (c, x_in, y_in), resource is (x_out, y_out).
     # The loop will identify x_in with x_out and y_in with y_out.
-    F = NamedProduct({"c": N, "x_in": N, "y_in": N})
-    R = NamedProduct({"x_out": N, "y_out": N})
+    F = Ports({"c": N, "x_in": N, "y_in": N})
+    R = Ports({"x_out": N, "y_out": N})
 
     def h(f):
         c = f["c"]
@@ -93,11 +93,11 @@ def make_problem():
 def make_looped(c_value: int):
     """Build the Loop DP that closes x_out -> x_in and y_out -> y_in."""
     N = Naturals()
-    # We rewrite the inner so that F = (c, xy) and R = (xy) with xy = NamedProduct
+    # We rewrite the inner so that F = (c, xy) and R = (xy) with xy = Ports
     # to use a single loop axis.
-    XY = NamedProduct({"x": N, "y": N})
-    F = NamedProduct({"c": N, "xy": XY})
-    R = NamedProduct({"xy": XY, "xy_report": XY})
+    XY = Ports({"x": N, "y": N})
+    F = Ports({"c": N, "xy": XY})
+    R = Ports({"xy": XY, "xy_report": XY})
 
     def h(f):
         c = int(f["c"])

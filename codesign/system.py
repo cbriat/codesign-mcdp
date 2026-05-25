@@ -44,7 +44,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from .antichains import Antichain
 from .composition import Loop
 from .dp import DesignProblem, FunctionDP
-from .posets import NamedProduct, Poset, Reals
+from .posets import Ports, Poset, Reals
 from .sugar import Expr, ModuleHandle, Port, compile_expr
 
 
@@ -157,9 +157,9 @@ class System:
             raise ValueError("module name may not contain '.' (used for port refs)")
         if module_name == _MODULES_AXIS:
             raise ValueError(f"module name {_MODULES_AXIS!r} is reserved")
-        if not isinstance(dp.F, NamedProduct) or not isinstance(dp.R, NamedProduct):
+        if not isinstance(dp.F, Ports) or not isinstance(dp.R, Ports):
             raise ValueError(
-                f"subsystem {module_name!r} must have NamedProduct F and R "
+                f"subsystem {module_name!r} must have Ports F and R "
                 f"(got F={type(dp.F).__name__}, R={type(dp.R).__name__})"
             )
         self._modules[module_name] = dp
@@ -270,7 +270,7 @@ class System:
         r_targets = self._r_targets
 
         # Build the module-R bundle poset (axis of the internal loop).
-        module_R_bundle = NamedProduct({
+        module_R_bundle = Ports({
             mod_name: mod.R for mod_name, mod in modules.items()
         })
 
@@ -280,17 +280,17 @@ class System:
         if modules:
             inner_F_components = dict(self._outer_F)
             inner_F_components[_MODULES_AXIS] = module_R_bundle
-            inner_F = NamedProduct(inner_F_components)
+            inner_F = Ports(inner_F_components)
 
             inner_R_components = dict(self._outer_R)
             inner_R_components[_MODULES_AXIS] = module_R_bundle
-            inner_R = NamedProduct(inner_R_components)
+            inner_R = Ports(inner_R_components)
         else:
             inner_F = (
-                NamedProduct(dict(self._outer_F))
-                if self._outer_F else NamedProduct({"_": Reals()})
+                Ports(dict(self._outer_F))
+                if self._outer_F else Ports({"_": Reals()})
             )
-            inner_R = NamedProduct(dict(self._outer_R))
+            inner_R = Ports(dict(self._outer_R))
 
         outer_F_keys = list(self._outer_F)
         outer_R_keys = list(self._outer_R)

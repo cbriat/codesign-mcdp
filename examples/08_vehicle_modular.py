@@ -12,7 +12,7 @@ from codesign import (
     CatalogDP,
     CatalogEntry,
     Module,
-    NamedProduct,
+    Ports,
     Reals,
     System,
     minimize_cost,
@@ -33,8 +33,8 @@ def make_motor_catalog() -> CatalogDP:
     function returning a plain DesignProblem.
     """
     return CatalogDP(
-        F=NamedProduct({"torque": Reals(unit="N*m")}),
-        R=NamedProduct({
+        F=Ports({"torque": Reals(unit="N*m")}),
+        R=Ports({
             "mass": Reals(unit="kg"),
             "cost": Reals(unit="USD"),
         }),

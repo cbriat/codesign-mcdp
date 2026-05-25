@@ -51,11 +51,11 @@ from typing import Any, Dict, List, Union
 
 from .antichains import Antichain
 from .dp import DesignProblem
-from .posets import NamedProduct, Poset
+from .posets import Ports, Poset
 
 
-# Module sentinel: the class attributes F and R are dicts (not NamedProducts).
-# The instance attributes (set in __init__) shadow them with NamedProducts.
+# Module sentinel: the class attributes F and R are dicts (not Portss).
+# The instance attributes (set in __init__) shadow them with Portss.
 
 
 class Module(DesignProblem):
@@ -74,7 +74,7 @@ class Module(DesignProblem):
     """
 
     # Class-level declarations, overridden by subclasses. These get
-    # shadowed by NamedProduct instance attributes after __init__ runs.
+    # shadowed by Ports instance attributes after __init__ runs.
     F: Dict[str, Poset] = {}
     R: Dict[str, Poset] = {}
     module_name: str = None  # type: ignore
@@ -88,18 +88,18 @@ class Module(DesignProblem):
                 f"dicts before calling super().__init__()."
             )
 
-        F_poset: NamedProduct = (
-            F_decl if isinstance(F_decl, NamedProduct)
-            else NamedProduct(dict(F_decl))
+        F_poset: Ports = (
+            F_decl if isinstance(F_decl, Ports)
+            else Ports(dict(F_decl))
         )
-        R_poset: NamedProduct = (
-            R_decl if isinstance(R_decl, NamedProduct)
-            else NamedProduct(dict(R_decl))
+        R_poset: Ports = (
+            R_decl if isinstance(R_decl, Ports)
+            else Ports(dict(R_decl))
         )
 
         cls_name = type(self).module_name or type(self).__name__.lower()
 
-        # Shadow the class-level dicts with NamedProduct instance attributes.
+        # Shadow the class-level dicts with Ports instance attributes.
         self.F = F_poset
         self.R = R_poset
         self.name = cls_name
@@ -116,7 +116,7 @@ class Module(DesignProblem):
     # implementation. We provide a small adapter that wraps non-Antichain
     # return values for convenience.
     @staticmethod
-    def _wrap_result(R_poset: NamedProduct, result: Any) -> Antichain:
+    def _wrap_result(R_poset: Ports, result: Any) -> Antichain:
         if isinstance(result, Antichain):
             return result
         if isinstance(result, dict):

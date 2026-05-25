@@ -69,7 +69,7 @@ The model is built here as a single `FunctionDP` wrapped in a `Loop` on `battery
     ("md", "## Imports"),
     ("code", """import math
 from codesign import (
-    Antichain, FunctionDP, Loop, NamedProduct, Reals, solve,
+    Antichain, FunctionDP, Loop, Ports, Reals, solve,
 )"""),
     ("md", """## Physical constants
 
@@ -81,13 +81,13 @@ C_LIFT = 10.0      # actuator coefficient, W per N^2 of lift"""),
 
 The functionality is `(endurance, extra_payload, extra_power, battery_mass)` and the resource is `(battery_mass, report_mass)`. Note that `battery_mass` appears on *both* sides: the inner DP receives the current iterate as a functionality input and emits a tightened estimate as a resource output. The `report_mass` is a mirrored copy of the same value so the outer R retains visibility of it (the `Loop` operator projects out the loop axis).
 """),
-    ("code", """F = NamedProduct({
+    ("code", """F = Ports({
     "endurance": Reals(unit="s"),
     "extra_payload": Reals(unit="kg"),
     "extra_power": Reals(unit="W"),
     "battery_mass": Reals(unit="kg"),
 })
-R = NamedProduct({
+R = Ports({
     "battery_mass": Reals(unit="kg"),
     "report_mass": Reals(unit="kg"),
 })
@@ -154,7 +154,7 @@ over $\\mathbb{N} \\times \\mathbb{N}$. For each $c$ we want the Pareto-minimal 
     ("md", "## Imports"),
     ("code", """import math
 from codesign import (
-    Antichain, FunctionDP, Loop, NamedProduct, Naturals, solve,
+    Antichain, FunctionDP, Loop, Ports, Naturals, solve,
 )"""),
     ("md", """## The model
 
@@ -162,9 +162,9 @@ The inner DP enumerates every splitting $(c_1, c_2)$ of the deficit into the two
 """),
     ("code", """def make_looped(c_value: int):
     N = Naturals()
-    XY = NamedProduct({"x": N, "y": N})
-    F = NamedProduct({"c": N, "xy": XY})
-    R = NamedProduct({"xy": XY, "xy_report": XY})
+    XY = Ports({"x": N, "y": N})
+    F = Ports({"c": N, "xy": XY})
+    R = Ports({"xy": XY, "xy_report": XY})
 
     def h(f):
         c = int(f["c"])
@@ -245,7 +245,7 @@ Larger $v$ shortens $T$ but costs more drag; wider $r$ shortens $T$ but costs mo
     ("md", "## Imports"),
     ("code", """import math
 from codesign import (
-    Antichain, FunctionDP, Loop, NamedProduct, Reals,
+    Antichain, FunctionDP, Loop, Ports, Reals,
     solve, minimize_cost,
 )"""),
     ("md", "## Build the AUV model"),
@@ -253,9 +253,9 @@ from codesign import (
     K_GEOM = 1.0; V_MAX = 3.0; R_MAX = 5.0
     PSI_A = 30.0; CHI_A = 50.0; SENSOR_COST_A = 200.0
 
-    Design = NamedProduct({"v": Reals(unit="m/s"), "r": Reals(unit="m")})
-    F = NamedProduct({"A": Reals(unit="m^2"), "design": Design})
-    R = NamedProduct({
+    Design = Ports({"v": Reals(unit="m/s"), "r": Reals(unit="m")})
+    F = Ports({"A": Reals(unit="m^2"), "design": Design})
+    R = Ports({
         "design": Design,
         "T": Reals(unit="s"), "E": Reals(unit="J"), "cost": Reals(unit="$"),
     })
@@ -339,14 +339,14 @@ Two of the more specialised primitives.
 """),
     ("md", "## Imports"),
     ("code", """from codesign import (
-    AlgebraicDP, NamedProduct, ODE_DP, Reals, UncertainDP, solve,
+    AlgebraicDP, Ports, ODE_DP, Reals, UncertainDP, solve,
 )"""),
     ("md", """## UncertainDP demo: battery with uncertain specific energy
 
 Old Li-ion cells average 1.6 MJ/kg; newer ones 2.0 MJ/kg. We bracket the unknown true value with the two limits and solve in both modes.
 """),
-    ("code", """F = NamedProduct({"capacity": Reals(unit="J")})
-R = NamedProduct({"mass": Reals(unit="kg")})
+    ("code", """F = Ports({"capacity": Reals(unit="J")})
+R = Ports({"mass": Reals(unit="kg")})
 
 pessimistic = AlgebraicDP(
     F=F, R=R,
@@ -374,8 +374,8 @@ A heated payload loses heat to the environment proportional to its temperature r
     ("code", """H_LOSS = 0.8  # W/K
 
 heater = ODE_DP(
-    F=NamedProduct({"delta_T": Reals(unit="K")}),
-    R=NamedProduct({"power": Reals(unit="W")}),
+    F=Ports({"delta_T": Reals(unit="K")}),
+    R=Ports({"power": Reals(unit="W")}),
     rhs=lambda x, t, f: H_LOSS * f["delta_T"] - x,
     extract=lambda x: {"power": float(x)},
     mode="steady_state",
@@ -410,16 +410,16 @@ We render the trace for three values of $c$ ($c = 1, 4, 8$). The seed is always 
 import matplotlib.pyplot as plt
 
 from codesign import (
-    Antichain, FunctionDP, Loop, NamedProduct, Naturals, solve,
+    Antichain, FunctionDP, Loop, Ports, Naturals, solve,
 )
 
 %matplotlib inline"""),
     ("md", "## The same model as notebook 02"),
     ("code", """def make_looped(c_value):
     N = Naturals()
-    XY = NamedProduct({"x": N, "y": N})
-    F = NamedProduct({"c": N, "xy": XY})
-    R = NamedProduct({"xy": XY, "xy_report": XY})
+    XY = Ports({"x": N, "y": N})
+    F = Ports({"c": N, "xy": XY})
+    R = Ports({"xy": XY, "xy_report": XY})
 
     def h(f):
         c = int(f["c"])
@@ -699,7 +699,7 @@ This notebook also uses the operator-overloaded constraint syntax introduced in 
 """),
     ("md", "## Imports"),
     ("code", """from codesign import (
-    CatalogDP, CatalogEntry, Module, NamedProduct, Reals,
+    CatalogDP, CatalogEntry, Module, Ports, Reals,
     System, minimize_cost, solve,
 )"""),
     ("md", """## Subsystem 1: a motor catalog
@@ -707,8 +707,8 @@ This notebook also uses the operator-overloaded constraint syntax introduced in 
 The catalog has Pareto-incomparable entries (lighter and more expensive vs. heavier and cheaper). `CatalogDP` is kept as a plain function constructor: multi-valued antichains don't fit the `Module` declarative pattern as cleanly.
 """),
     ("code", """motor = CatalogDP(
-    F=NamedProduct({"torque": Reals(unit="N*m")}),
-    R=NamedProduct({"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}),
+    F=Ports({"torque": Reals(unit="N*m")}),
+    R=Ports({"mass": Reals(unit="kg"), "cost": Reals(unit="USD")}),
     catalog=[
         CatalogEntry(name="Tiny",          provides={"torque": 2.0},  costs={"mass": 0.20, "cost": 30.0}),
         CatalogEntry(name="Light-Premium", provides={"torque": 8.0},  costs={"mass": 0.50, "cost": 200.0}),
@@ -1552,14 +1552,14 @@ This notebook reproduces the spirit of the multi-robot fleet case study. A logis
     ("md", "## The problem"),
     ("code", """import math, random
 from codesign import (
-    AlgebraicDP, Reals, NamedProduct, solve,
+    AlgebraicDP, Reals, Ports, solve,
     solve_online, LipschitzEvaluator,
     MonotonicityEvaluator, LinearParametricEvaluator,
 )
 
-F = NamedProduct({"target_throughput": Reals(unit="pkg/h"),
+F = Ports({"target_throughput": Reals(unit="pkg/h"),
                   "target_range":      Reals(unit="km")})
-R = NamedProduct({"total_cost":   Reals(unit="USD"),
+R = Ports({"total_cost":   Reals(unit="USD"),
                   "total_energy": Reals(unit="kWh/day")})
 
 def make_dp(robot):

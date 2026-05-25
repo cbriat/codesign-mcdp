@@ -32,7 +32,7 @@ from .dp import (
 )
 from .mcdpl import MCDP
 from .module import Module
-from .posets import Discrete, NamedProduct, Naturals, Poset, Reals
+from .posets import Discrete, NamedProduct, Naturals, Ports, Poset, Reals
 from .primitives import adder, constant, identity, multiplier, scale
 from .solver import SolveResult, TraceEntry, kleene_loop, minimize_cost, solve
 from .sugar import Expr, ModuleHandle, Port, exp, log, sqrt
@@ -60,7 +60,7 @@ from .online import (
 from . import viz
 
 __all__ = [
-    "Reals", "Naturals", "Discrete", "NamedProduct", "Poset",
+    "Reals", "Naturals", "Discrete", "Ports", "NamedProduct", "Poset",
     "Antichain",
     "DesignProblem", "AlgebraicDP", "FunctionDP", "CatalogDP", "CatalogEntry",
     "ConstraintDP", "ODE_DP", "UncertainDP",

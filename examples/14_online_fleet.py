@@ -47,7 +47,7 @@ from codesign import (
     LinearParametricEvaluator,
     LipschitzEvaluator,
     MonotonicityEvaluator,
-    NamedProduct,
+    Ports,
     Reals,
     solve,
     solve_online,
@@ -59,11 +59,11 @@ from codesign import (
 # ---------------------------------------------------------------------------
 
 
-F = NamedProduct({
+F = Ports({
     "target_throughput": Reals(unit="pkg/h"),
     "target_range":      Reals(unit="km"),
 })
-R = NamedProduct({
+R = Ports({
     "total_cost":   Reals(unit="USD"),
     "total_energy": Reals(unit="kWh/day"),
 })
