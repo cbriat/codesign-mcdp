@@ -10,6 +10,8 @@ from codesign import (
     solve,
     System, Module,
     Box, Stochastic, GaussianCopula,
+    LipschitzEvaluator, MonotonicityEvaluator,
+    LinearParametricEvaluator, solve_online,
 )
 
 
@@ -422,6 +424,215 @@ def test_uncertainty_stochastic():
           f"feas={res.feasibility_rate:.2f}")
 
 
+def test_warm_start():
+    """Warm-start: solving with start_from=prev should accept the prior
+    inner antichain and converge in fewer iterations on average."""
+    print("\n=== Warm start across a parameter sweep ===")
+    import numpy as np
+
+    class Battery(Module):
+        F = {"capacity": Reals(unit="J")}
+        R = {"mass": Reals(unit="kg")}
+        def h(self, f):
+            return {"mass": f["capacity"] / 1.8e6}
+
+    class Actuator(Module):
+        F = {"lift_force": Reals(unit="N")}
+        R = {"power": Reals(unit="W")}
+        def h(self, f):
+            return {"power": 10.0 * f["lift_force"] ** 2}
+
+    sys = System("drone")
+    endurance = sys.provides("endurance", unit="s")
+    extra_p   = sys.provides("extra_power", unit="W")
+    extra_pl  = sys.provides("extra_payload", unit="kg")
+    total_m   = sys.requires("total_mass", unit="kg")
+    b = sys.add("battery",  Battery())
+    a = sys.add("actuator", Actuator())
+    b.capacity    >= (a.power + extra_p) * endurance
+    a.lift_force  >= 9.81 * (b.mass + extra_pl)
+    total_m       >= b.mass + extra_pl
+    drone = sys.build()
+
+    endurances = np.linspace(60.0, 300.0, 30)
+
+    cold_iters = 0
+    cold_masses = []
+    for L in endurances:
+        f = {"endurance": float(L), "extra_payload": 0.5, "extra_power": 5.0}
+        r = solve(drone, f, max_iter=200)
+        cold_iters += r.iterations
+        cold_masses.append(list(r.antichain.points)[0]["total_mass"])
+
+    warm_iters = 0
+    warm_masses = []
+    prev = None
+    for L in endurances:
+        f = {"endurance": float(L), "extra_payload": 0.5, "extra_power": 5.0}
+        r = solve(drone, f, max_iter=200, start_from=prev)
+        warm_iters += r.iterations
+        warm_masses.append(list(r.antichain.points)[0]["total_mass"])
+        prev = r
+
+    # Same answer up to FP noise, warm not slower than cold.
+    for cm, wm in zip(cold_masses, warm_masses):
+        assert abs(cm - wm) < 1e-6, (cm, wm)
+    assert warm_iters <= cold_iters
+
+    # Also: start_from with an Antichain directly works.
+    r_first = solve(drone,
+                    {"endurance": 100.0, "extra_power": 5.0, "extra_payload": 0.5},
+                    max_iter=200, trace=True)
+    inner = r_first._inner_antichain
+    r_again = solve(drone,
+                    {"endurance": 100.0, "extra_power": 5.0, "extra_payload": 0.5},
+                    max_iter=200, start_from=inner)
+    assert r_again.iterations <= 2, r_again.iterations  # immediately fixed
+
+    print(f"cold={cold_iters} warm={warm_iters} "
+          f"(speedup {cold_iters/max(warm_iters,1):.2f}x)")
+
+
+def test_viz_smoke():
+    """Visualisation helpers should at least run without errors."""
+    print("\n=== Visualisation smoke ===")
+    from codesign import viz
+    from codesign.antichains import Antichain
+    from codesign.posets import NamedProduct
+
+    class Battery(Module):
+        F = {"capacity": Reals(unit="J")}
+        R = {"mass": Reals(unit="kg")}
+        def h(self, f):
+            return {"mass": f["capacity"] / 1.8e6}
+
+    class Actuator(Module):
+        F = {"lift_force": Reals(unit="N")}
+        R = {"power": Reals(unit="W")}
+        def h(self, f):
+            return {"power": 10.0 * f["lift_force"] ** 2}
+
+    sys = System("drone")
+    endurance = sys.provides("endurance", unit="s")
+    extra_p   = sys.provides("extra_power", unit="W")
+    extra_pl  = sys.provides("extra_payload", unit="kg")
+    total_m   = sys.requires("total_mass", unit="kg")
+    b = sys.add("battery",  Battery())
+    a = sys.add("actuator", Actuator())
+    b.capacity    >= (a.power + extra_p) * endurance
+    a.lift_force  >= 9.81 * (b.mass + extra_pl)
+    total_m       >= b.mass + extra_pl
+    drone = sys.build()
+
+    # to_dot should produce a dot string with all four wires named.
+    dot = viz.to_dot(drone)
+    assert "digraph" in dot
+    assert "battery" in dot and "actuator" in dot
+    # cyclic-or-not, both modules should appear as nodes
+    assert dot.count("[label=") >= 2
+
+    # plot functions should at least import matplotlib lazily; we skip if
+    # it isn't available, so the test passes on minimal installations.
+    try:
+        import matplotlib  # noqa: F401
+        import matplotlib.pyplot as plt
+        matplotlib.use("Agg", force=True)
+    except ImportError:
+        print("(matplotlib not installed; skipping plot tests)")
+        return
+
+    r = solve(drone,
+              {"endurance": 300.0, "extra_power": 5.0, "extra_payload": 0.5},
+              max_iter=200, trace=True)
+    ax = viz.plot_convergence(r)
+    assert ax is not None
+    plt.close()
+
+    # plot_antichain on a handcrafted 2D antichain
+    R = NamedProduct({"cost": Reals(), "weight": Reals()})
+    pts = [{"cost": 100, "weight": 5},
+           {"cost": 80,  "weight": 8},
+           {"cost": 60,  "weight": 12}]
+    a2 = Antichain.from_set(R, pts)
+    ax = viz.plot_antichain(a2, axes=["cost", "weight"])
+    assert ax is not None
+    plt.close()
+    print("viz smoke ok")
+
+
+def test_online_solver():
+    """The online elimination solver should agree with exhaustive solve.
+
+    Builds a small catalogue, runs exhaustive then online with each of
+    the three evaluators, and checks: (a) Lipschitz and Monotonicity
+    find the same antichain, (b) they evaluate strictly fewer
+    candidates than the catalogue size when bounds bite.
+    """
+    print("\n=== Online elimination solver ===")
+    import math, random
+
+    F = NamedProduct({"target_throughput": Reals(unit="pkg/h")})
+    R = NamedProduct({"total_cost": Reals(unit="USD")})
+
+    def make_dp(robot):
+        cap = robot["speed"] * robot["payload"]
+        uc = robot["unit_cost"]
+        return AlgebraicDP(F, R, {
+            "total_cost": lambda f, c=cap, u=uc: (f["target_throughput"] / c) * u,
+        })
+
+    rng = random.Random(0)
+    candidates = []
+    for i in range(60):
+        s = rng.uniform(5, 30)
+        p = rng.uniform(1, 20)
+        c = rng.uniform(500, 5000)
+        candidates.append({
+            "name": f"r{i}", "speed": s, "payload": p, "unit_cost": c,
+            "cost_per_capacity": c / (s * p),
+        })
+    f = {"target_throughput": 100.0}
+
+    # Exhaustive baseline
+    costs = []
+    for c in candidates:
+        pt = list(solve(make_dp(c), f).antichain.points)[0]
+        costs.append((pt["total_cost"], c["name"]))
+    costs.sort()
+    opt = costs[0][0]
+
+    # Monotonicity with the derived monotone feature: same optimum,
+    # strictly fewer evaluations.
+    ev = MonotonicityEvaluator(features=["cost_per_capacity"],
+                               r_components=["total_cost"])
+    res_mono = solve_online(make_dp, f, candidates=candidates, evaluator=ev)
+    found_mono = list(res_mono.antichain.points)[0]["total_cost"]
+    assert abs(found_mono - opt) < 1e-6, (found_mono, opt)
+    assert res_mono.n_evaluated < len(candidates), res_mono.n_evaluated
+    assert res_mono.n_evaluated + res_mono.n_eliminated == len(candidates)
+
+    # Lipschitz with sufficient L: same optimum.
+    ev = LipschitzEvaluator(features=["speed", "payload", "unit_cost"],
+                            r_components=["total_cost"], L=500.0)
+    res_lip = solve_online(make_dp, f, candidates=candidates, evaluator=ev)
+    found_lip = list(res_lip.antichain.points)[0]["total_cost"]
+    assert abs(found_lip - opt) < 1e-6, (found_lip, opt)
+    assert res_lip.n_evaluated <= len(candidates)
+
+    # LinearParametric ran and didn't crash; correctness is best-effort.
+    ev = LinearParametricEvaluator(features=["speed", "payload", "unit_cost"],
+                                   r_components=["total_cost"],
+                                   confidence=3.0, min_obs=4)
+    res_par = solve_online(make_dp, f, candidates=candidates, evaluator=ev)
+    assert res_par.n_evaluated >= 1
+    assert len(res_par.antichain) >= 1
+
+    print(f"exhaustive opt={opt:.2f}, "
+          f"mono {res_mono.n_evaluated}ev, "
+          f"lip {res_lip.n_evaluated}ev, "
+          f"linpar {res_par.n_evaluated}ev")
+
+
 if __name__ == "__main__":
     test_posets()
     test_antichain()
@@ -436,4 +647,7 @@ if __name__ == "__main__":
     test_solver_trace_and_status()
     test_uncertainty_box()
     test_uncertainty_stochastic()
+    test_warm_start()
+    test_viz_smoke()
+    test_online_solver()
     print("\nAll smoke tests passed.")

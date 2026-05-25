@@ -106,6 +106,10 @@ class SolveResult:
     status: str = "converged"
     feasible: bool = True
     trace: Optional[List[TraceEntry]] = None
+    # Internal: the inner-poset antichain at convergence, kept so warm
+    # starts can reuse it directly without lifting from the outer R.
+    # Not part of the public attribute surface; intended for the solver.
+    _inner_antichain: Optional[Antichain] = None
 
     @property
     def converged(self) -> bool:
@@ -205,6 +209,7 @@ def kleene_loop(
     verbose: int = 0,
     on_iteration: Optional[Callable[[TraceEntry], None]] = None,
     info_out: Optional[dict] = None,
+    start_from: Optional[Antichain] = None,
     # Legacy parameters for backward compatibility:
     record_trace: bool = False,
     trace_out: Optional[list] = None,
@@ -230,8 +235,14 @@ def kleene_loop(
         Called with each :class:`TraceEntry` as it is produced (including
         the seed at iteration 0).
     info_out : dict, optional
-        If supplied, ``info_out`` receives ``iterations``, ``status``, and
-        (if ``trace=True``) ``trace``.
+        If supplied, ``info_out`` receives ``iterations``, ``status``,
+        ``inner_antichain``, and (if ``trace=True``) ``trace``.
+    start_from : Antichain, optional
+        Initial antichain to seed the Kleene iteration. Must live in the
+        inner R poset. When ``None``, the seed is the singleton at the
+        bottom of inner R (the standard cold start). Warm starting from
+        a near-correct antichain can dramatically reduce iteration count
+        in parameter sweeps.
     record_trace, trace_out : legacy
         If ``record_trace=True`` and ``trace_out`` is a list, every step's
         antichain is appended (older two-call interface).
@@ -240,8 +251,23 @@ def kleene_loop(
     axis = loop_dp.axis
     R_loop = inner.R
 
-    # Seed.
-    A = Antichain.singleton(R_loop, R_loop.bottom())
+    # Seed: warm start if provided, else cold start at the bottom.
+    if start_from is not None:
+        # Validate: same poset (cheap structural check) and non-empty.
+        if not hasattr(start_from, "points"):
+            raise TypeError(
+                "start_from must be an Antichain; got "
+                f"{type(start_from).__name__}"
+            )
+        if len(start_from) == 0:
+            # Empty antichain means infeasibility was already established
+            # upstream; nothing to iterate. Fall back to cold start to
+            # be safe.
+            A = Antichain.singleton(R_loop, R_loop.bottom())
+        else:
+            A = start_from
+    else:
+        A = Antichain.singleton(R_loop, R_loop.bottom())
 
     legacy_trace_active = record_trace and (trace_out is not None)
     if legacy_trace_active:
@@ -351,6 +377,7 @@ def kleene_loop(
     if info_out is not None:
         info_out["iterations"] = iterations
         info_out["status"] = status
+        info_out["inner_antichain"] = A
         if structured_trace is not None:
             info_out["trace"] = structured_trace
 
@@ -387,6 +414,7 @@ def solve(
     trace: bool = False,
     verbose: int = 0,
     on_iteration: Optional[Callable[[TraceEntry], None]] = None,
+    start_from: Optional[Any] = None,
     # Legacy alias:
     record_trace: bool = False,
     # Uncertainty (lazy import inside to avoid circular dependency):
@@ -410,6 +438,12 @@ def solve(
         Live printing level: 0 silent, 1 summary, 2 per-iteration.
     on_iteration : callable, keyword-only
         Optional callback receiving each :class:`TraceEntry`.
+    start_from : SolveResult, Antichain, or None, keyword-only
+        Warm-start the Kleene iteration from a previous result. Pass a
+        :class:`SolveResult` to reuse its inner antichain (typical case
+        in parameter sweeps), or pass an :class:`Antichain` directly if
+        you have one in hand. For non-Loop DPs the argument is ignored.
+        Cold start is the default.
     record_trace : bool, keyword-only
         Backward-compatibility alias for ``trace`` (older code may pass this).
     uncertainty : list[str] or None, keyword-only
@@ -441,16 +475,32 @@ def solve(
 
     do_trace = trace or record_trace
 
+    # Resolve the warm-start seed.
+    seed_antichain: Optional[Antichain] = None
+    if start_from is not None:
+        if isinstance(start_from, SolveResult):
+            seed_antichain = start_from._inner_antichain
+        elif hasattr(start_from, "points"):
+            # Looks like an Antichain.
+            seed_antichain = start_from
+        else:
+            raise TypeError(
+                "start_from must be a SolveResult, an Antichain, or None; "
+                f"got {type(start_from).__name__}"
+            )
+
     if isinstance(dp, Loop):
         info: dict = {}
         antichain = kleene_loop(
             dp, functionality, max_iter=max_iter,
             trace=do_trace, verbose=verbose, on_iteration=on_iteration,
             info_out=info,
+            start_from=seed_antichain,
         )
         iters = info.get("iterations", 0)
         status = info.get("status", "converged")
         trace_data = info.get("trace") if do_trace else None
+        inner_antichain = info.get("inner_antichain")
     else:
         # Non-looped DP: single evaluation, no iteration.
         t0 = time.perf_counter()
@@ -475,6 +525,7 @@ def solve(
                 on_iteration(final)
         else:
             trace_data = None
+        inner_antichain = None
         if verbose >= 1:
             print(
                 f"[solve] non-loop DP evaluated in {ms:.2f}ms, "
@@ -488,6 +539,7 @@ def solve(
         status=status,
         feasible=feasible,
         trace=trace_data,
+        _inner_antichain=inner_antichain,
     )
 
 

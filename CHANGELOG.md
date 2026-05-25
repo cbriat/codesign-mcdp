@@ -9,6 +9,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Online learning (compositional, elimination-based)
+- New `codesign.online` module implementing the optimistic-evaluator
+  solver from Alharbi, Dahleh & Zardini (arXiv:2604.22624).
+- `OptimisticEvaluator` abstract base maintains an observation history
+  and exposes a `bound(candidate) -> (lower, upper)` interface; the
+  default fallback is `(0, +inf)` for every R component.
+- Three concrete evaluators:
+    - `MonotonicityEvaluator(features, r_components)` — assumes
+      component-wise monotonicity in the features. Aggressive when
+      applicable, only correct if monotonicity genuinely holds.
+    - `LipschitzEvaluator(features, r_components, L)` — assumes
+      Lipschitz output with a user-supplied constant. Safe default
+      across most problems; `L` can be a scalar or a dict per R component.
+    - `LinearParametricEvaluator(features, r_components,
+      confidence=2.0, min_obs=3)` — fits a running OLS model and bounds
+      by a confidence band on the regressor. Fastest in practice but
+      least safe when the linear assumption breaks.
+- `solve_online(candidate_fn, functionality, *, candidates, evaluator,
+  budget=None)` runs the elimination loop: bound, pick the most
+  promising survivor by UCB on lower bound, run the inner solve via
+  `codesign.solver.solve`, merge into the incumbent antichain, prune
+  newly dominated candidates, repeat until the candidates are
+  exhausted or the budget is hit.
+- `OnlineResult` dataclass with `antichain`, `n_evaluated`,
+  `n_eliminated`, `n_candidates`, `history` (per-iteration log),
+  `evaluated_ids`, `eliminated_ids`, and `incumbent_ids` (which
+  evaluations contributed to the final antichain).
+- New example `14_online_fleet.py`: 200-candidate heterogeneous robot
+  fleet sizing, side-by-side comparison of the three evaluators with
+  a feature-space elimination plot.
+- New notebook `notebooks/14_online_fleet.ipynb` covering the same
+  case study with an explanatory walk-through.
+- New smoke test `test_online_solver`.
+
+#### Visualisation helpers
+- New `codesign.viz` module, importable as `from codesign import viz`.
+- `viz.plot_antichain(result, axes)` renders the Pareto front as a 2D
+  or 3D scatter (accepts a `SolveResult`, `UncertaintyResult`, or
+  bare `Antichain`); optionally shades dominated regions.
+- `viz.plot_convergence(result)` plots the Kleene delta-vs-iteration
+  on a log axis; works on a `SolveResult` with a trace or a trace
+  list directly.
+- `viz.plot_uncertainty(unc_result, port, nominal=None)` draws a
+  histogram of the MC samples for the named R port and marks the
+  nominal, mean, p95, CVaR95 summaries.
+- `viz.to_dot(dp, name=...)` produces a GraphViz dot string showing
+  the system's modules, outer ports, and connection constraints.
+- All helpers accept an optional `ax=` to compose into a larger figure.
+
+#### Solver warm-start
+- `solve(dp, f, ..., start_from=prev)` seeds the Kleene iteration
+  from a previously computed `SolveResult` (or `Antichain`). The
+  inner antichain is reused as the initial `A_0` for the new solve.
+- `SolveResult._inner_antichain` carries the converged inner-loop
+  antichain so it can be passed straight back as a warm start.
+- Sweep tests of the microgrid example show roughly 10% fewer total
+  Kleene iterations under warm-start versus a cold start at each
+  parameter point.
+
+#### Flagship microgrid case study
+- New example `13_microgrid.py`: solar PV + lithium battery +
+  diesel generator + structural frame with a cyclic mass coupling.
+- Exercises: catalog choice over four battery chemistries, warm-
+  started parameter sweep, stochastic sun-hours via `Stochastic`,
+  and every visualisation helper.
+- New notebook `notebooks/13_microgrid.ipynb`.
+
 #### Solver observability
 - `TraceEntry` dataclass capturing per-iteration state: `iteration`,
   `antichain`, `n_points`, `delta` (max absolute change for numeric

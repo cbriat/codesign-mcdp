@@ -917,6 +917,134 @@ uncertainty." Notebooks 11 and 12 visualise this for the
 example-7 drone.
 
 % ===========================================================================
+\section{Online Learning}
+\label{sec:online-learning}
+% ===========================================================================
+
+When a co-design problem has many discrete candidates (catalogue
+entries, robot types, component families) and each candidate's
+inner solve is non-trivial, the naive ``evaluate every entry''
+strategy is wasteful. The \texttt{codesign.online} module implements
+the compositional online learner of Alharbi, Dahleh \& Zardini
+(\texttt{arXiv:2604.22624}): maintain history-dependent bounds on
+each candidate's inner-solve output, evaluate the most promising one
+under an upper-confidence rule, then prune any candidate whose lower
+bound is already dominated by the incumbent.
+
+\subsection{Optimistic evaluators}
+
+The bound machinery is encapsulated in a small class hierarchy.
+\texttt{OptimisticEvaluator} is the abstract base; subclasses
+implement \texttt{bound(candidate)} returning a pair of dicts
+\texttt{(lower, upper)} mapping each numeric R component to its
+current lower and upper bound at the queried feature point. Tighter
+bounds prune more candidates; looser bounds are always safe.
+
+Three concrete evaluators are provided:
+
+\paragraph{Monotonicity.}
+\texttt{MonotonicityEvaluator(features, r\_components)} assumes the
+inner-solve output is component-wise monotone in the named features.
+Given an observation at feature point $f_0$ with antichain-min $R_0$,
+any candidate whose features dominate $f_0$ has resources $\geq R_0$
+(lower bound); any candidate dominated by $f_0$ has resources
+$\leq R_0$ (upper bound). Aggressive when applicable. Only correct if
+the monotonicity assumption genuinely holds: choosing a derived
+feature (e.g.\ \texttt{cost\_per\_capacity = unit\_cost /
+(speed * payload)}) is often what makes this safe in practice.
+
+\paragraph{Lipschitz.}
+\texttt{LipschitzEvaluator(features, r\_components, L)} assumes
+$|h(c_1) - h(c_2)| \leq L \cdot \|features(c_1) - features(c_2)\|$
+(Euclidean distance, per R component). Each observation tightens the
+bound by a cone of slope $L$. The constant can be a scalar (same for
+every R component) or a dict per component. Safe default: with a
+sensible $L$ the bound never prunes a Pareto-optimal candidate.
+
+\paragraph{Linear-parametric.}
+\texttt{LinearParametricEvaluator(features, r\_components,
+confidence=2.0, min\_obs=3)} fits a running OLS model
+$h_k(c) \approx a_k + b_k \cdot features(c)$ and bounds new queries
+by a confidence band of width \texttt{confidence} times the residual
+standard deviation. Fastest in practice. Risk: when the true
+relationship is nonlinear, the confidence band can be too tight and
+a Pareto-optimal candidate can be wrongly eliminated.
+
+\paragraph{Subclassing.} Custom evaluators only need to override
+\texttt{bound(candidate)}; the base class handles observation
+recording and the default fallback bound of $(0, +\infty)$.
+
+\subsection{The online solver}
+
+\begin{lstlisting}
+result = solve_online(
+    candidate_fn,         # candidate_fn(candidate) -> DP
+    functionality,        # outer F vector
+    *,
+    candidates,           # list of feature dicts
+    evaluator,            # OptimisticEvaluator instance
+    budget=None,          # max inner solves; None = unbounded
+    max_iter=200,         # forwarded to each inner solve
+    verbose=0,
+)
+\end{lstlisting}
+
+Algorithm (a simplified Algorithm~2 from Alharbi et al.):
+\begin{enumerate}
+\item Bound every remaining candidate via the evaluator.
+\item Eliminate every candidate whose lower bound is already
+  dominated by the current incumbent antichain.
+\item Pick the most promising survivor by UCB on its lower-bound
+  sum.
+\item Run the inner solve at that candidate; observe the result in
+  the evaluator; merge into the incumbent via \texttt{union\_min}.
+\item Repeat until the candidates are exhausted or the budget is hit.
+\end{enumerate}
+
+The returned \texttt{OnlineResult} exposes:
+\begin{description}
+\item[\texttt{antichain}] Min over the evaluated, surviving candidates.
+\item[\texttt{n\_evaluated}, \texttt{n\_eliminated},
+       \texttt{n\_candidates}] Bookkeeping for the elimination cascade.
+\item[\texttt{evaluated\_ids}, \texttt{eliminated\_ids},
+       \texttt{incumbent\_ids}] Lists of indices into the original
+  candidate list.
+\item[\texttt{history}] Per-iteration log:
+  \texttt{\{pick, antichain, remaining, evaluated, eliminated\}}.
+\end{description}
+
+% ===========================================================================
+\section{Visualisation}
+\label{sec:visualisation}
+% ===========================================================================
+
+The \texttt{codesign.viz} module exposes four helpers built on
+\texttt{matplotlib} and a small GraphViz emitter:
+
+\begin{description}
+\item[\texttt{plot\_antichain(result, axes)}] Scatter the antichain
+  on the chosen 2D or 3D axes. Accepts a \texttt{SolveResult}, an
+  \texttt{UncertaintyResult} (uses its worst case), or a bare
+  \texttt{Antichain}. The 2D version optionally shades each point's
+  dominated region for visual clarity.
+\item[\texttt{plot\_convergence(result)}] Semilog plot of the
+  Kleene delta against iteration index. Accepts a \texttt{SolveResult}
+  with a trace or a trace list directly. Useful for diagnosing
+  oscillating fixed points and tuning \texttt{max\_iter}.
+\item[\texttt{plot\_uncertainty(unc\_result, port, nominal=None)}]
+  Histogram of the Monte Carlo samples for the named R port, with
+  the nominal, mean, p95, and CVaR95 marked as vertical lines.
+\item[\texttt{to\_dot(dp, name="dp")}] GraphViz dot string for the
+  system structure: modules as boxes, outer ports as labelled
+  rectangles, constraint connections as edges. Render with
+  \texttt{dot -Tpng} or paste into an online viewer.
+\end{description}
+
+All four accept an optional \texttt{ax=...} argument so they compose
+into larger figures. The module is imported as
+\texttt{from codesign import viz}.
+
+% ===========================================================================
 \section{The MCDP Builder}
 \label{sec:mcdp-builder}
 % ===========================================================================
@@ -1243,6 +1371,44 @@ worst\_case, the canonical ordering. The notebook adds a matplotlib
 histogram of the MC distribution with vertical markers at each
 summary.
 
+\subsection{Example 13: the microgrid flagship}
+
+\texttt{13\_microgrid.py}. An off-grid cabin must supply daily
+energy and peak load from four subsystems: solar PV, lithium
+battery (with a discrete chemistry choice over LFP, NMC, LCO,
+NaIon), diesel generator, and structural frame. The frame's mass
+depends on the total supported mass \emph{including its own}, so
+the Kleene iteration does real work; iteration counts of 20--25 are
+typical at the test mission. The example exercises every package
+feature in turn: catalog choice, cyclic coupling, warm-started
+parameter sweep over a 50-point load range (the second pass through
+the sweep, reusing the previous fixed point, takes roughly 10\,\%
+fewer total Kleene steps), stochastic sun hours via
+\texttt{Stochastic}, and the full visualisation suite.
+
+\subsection{Example 14: online elimination over a robot catalogue}
+
+\texttt{14\_online\_fleet.py}. A logistics service must hit a
+target throughput and range from a catalogue of 200 candidate robot
+types, each described by four features (speed, payload, unit cost,
+energy per km). The exhaustive solve runs 200 inner solves; the
+online solver from \texttt{codesign.online} prunes by an
+optimistic-evaluator bound. The example compares three flavours:
+\begin{itemize}
+\item Lipschitz with $L = 300$ for cost and $L = 30$ for energy
+  evaluates roughly 190 / 200 candidates but provably recovers all
+  Pareto-optimal types.
+\item Monotonicity on a derived
+  \texttt{cost\_per\_capacity = unit\_cost / (speed \cdot payload)}
+  feature evaluates only 13 / 200 candidates and still recovers
+  every Pareto point.
+\item Linear-parametric with a 3-sigma confidence band evaluates
+  roughly 35 / 200 candidates but wrongly eliminates one Pareto
+  point on this seed, illustrating the bias-variance tradeoff.
+\end{itemize}
+The notebook visualises the elimination cascade in feature space
+with stars marking the true Pareto front.
+
 % ===========================================================================
 \section{Modelling Guidelines and Pitfalls}
 \label{sec:guidelines}
@@ -1355,7 +1521,8 @@ below.
 
 \paragraph{Solver.}
 \texttt{solve}, \texttt{kleene\_loop}, \texttt{minimize\_cost},
-\texttt{SolveResult}, \texttt{TraceEntry}.
+\texttt{SolveResult}, \texttt{TraceEntry}. Warm-start via the
+\texttt{start\_from=} argument on \texttt{solve}.
 
 \paragraph{Builders.}
 \texttt{MCDP}, \texttt{System}.
@@ -1377,6 +1544,18 @@ Result: \texttt{UncertaintyResult}.
 Entry point: \texttt{solve\_with\_uncertainty} (the same machinery is
 also reachable through \texttt{solve(dp, f, uncertainty=[...])}).
 
+\paragraph{Online learning.}
+\texttt{OptimisticEvaluator} (abstract);
+\texttt{MonotonicityEvaluator}, \texttt{LipschitzEvaluator},
+\texttt{LinearParametricEvaluator}.
+Result: \texttt{OnlineResult}.
+Entry point: \texttt{solve\_online}.
+
+\paragraph{Visualisation.}
+Imported as \texttt{from codesign import viz}. Functions:
+\texttt{plot\_antichain}, \texttt{plot\_convergence},
+\texttt{plot\_uncertainty}, \texttt{to\_dot}.
+
 \paragraph{Module-level.}
 \texttt{\_\_version\_\_} (the string \texttt{"0.1.0"}).
 
@@ -1392,6 +1571,10 @@ also reachable through \texttt{solve(dp, f, uncertainty=[...])}).
   \item B.\,A. Davey and H.\,A. Priestley. \emph{Introduction to
         Lattices and Order}. Cambridge University Press, 2nd ed.,
         2002.
+  \item Saud Alharbi, Munther A. Dahleh, and Gioele Zardini.
+        \emph{Compositional Online Learning for Co-Design}.
+        arXiv:2604.22624, 2026.
+        \url{https://arxiv.org/abs/2604.22624}
   \item The MCDPL software distribution.
         \url{https://co-design.science/software/}
 \end{enumerate}

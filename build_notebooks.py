@@ -668,6 +668,13 @@ sys.constrain("total_mass",
 
 Both forms still work and compile to the same internal constraint list. The operator form is what we recommend for new code.
 """),
+    ("md", """## System structure with `viz.to_dot`
+
+The constraint graph is implicit in the operator overloading; `viz.to_dot` extracts it as a GraphViz dot string. Render it externally with `dot -Tpng` or paste into [graphviz online](https://dreampuf.github.io/GraphvizOnline/) to see modules, outer ports, and the edges connecting them.
+"""),
+    ("code", """from codesign import viz
+dot = viz.to_dot(drone, name="drone")
+print(dot)"""),
 ]
 
 
@@ -793,6 +800,20 @@ For Heavy + long, even the biggest motor in the catalog can't supply enough torq
 
 This is the payoff of modularity: each subsystem has a clean local definition, and the global Pareto structure is discovered by the solver from the constraint graph alone.
 """),
+    ("md", """## Visualising the Pareto front
+
+`codesign.viz.plot_antichain` renders the front as a 2D scatter with dominance regions shaded. Each star is a Pareto-optimal design; the shaded quadrant is the set of (mass, cost) pairs it dominates.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+from codesign import viz
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+for ax, (label, f) in zip(axes, cases[:2]):
+    result = solve(vehicle, f, max_iter=200)
+    viz.plot_antichain(result, axes=["total_mass", "total_cost"], ax=ax)
+    ax.set_title(f"{label}: {len(result.antichain)} Pareto designs")
+fig.tight_layout()
+plt.show()"""),
 ]
 
 
@@ -1022,23 +1043,13 @@ print(f"first 5 deltas: {[e.delta for e in r.trace[:5]]}")
 print(f"final delta: {r.trace[-1].delta}")"""),
     ("md", """## Plotting the convergence
 
-With matplotlib we can visualise how the delta decays. For this drone the deltas oscillate between two coupled axes (battery mass and actuator power) and decay to roughly machine precision.
+The `codesign.viz` module provides `plot_convergence` as a one-liner; for this drone the deltas oscillate between two coupled axes (battery mass and actuator power) and decay to roughly machine precision.
 """),
     ("code", """import matplotlib.pyplot as plt
-import numpy as np
+from codesign import viz
 
-iters = [e.iteration for e in r.trace if e.delta is not None]
-deltas = [e.delta for e in r.trace if e.delta is not None]
-
-fig, ax = plt.subplots(figsize=(7, 4))
-# Replace zeros with a small floor for log scale
-floor = 1e-18
-deltas_plot = [max(d, floor) for d in deltas]
-ax.semilogy(iters, deltas_plot, marker="o", markersize=4)
-ax.set_xlabel("Kleene iteration")
-ax.set_ylabel("delta (max |change|)")
+ax = viz.plot_convergence(r)
 ax.set_title("Convergence of the drone fixed point")
-ax.grid(True, which="both", alpha=0.3)
 plt.tight_layout()
 plt.show()"""),
     ("md", """## on_iteration: a custom callback
@@ -1258,31 +1269,18 @@ print(f"CVaR (worst 5% mean): {res.cvar95['total_mass']:.4f} kg")
 print(f"Feasibility rate:     {res.feasibility_rate:.3f}")"""),
     ("md", """## Visualising the distribution
 
-The raw antichain per MC sample is on `res.samples`. For this single-output drone we can plot a histogram of `total_mass` and mark each summary.
+The raw antichain per MC sample is on `res.samples`. The `codesign.viz` module provides `plot_uncertainty` as a one-liner that draws the histogram and marks each summary statistic.
 """),
     ("code", """import matplotlib.pyplot as plt
-import numpy as np
+from codesign import viz
 
-feasible_masses = [
-    list(s.points)[0]["total_mass"]
-    for s in res.samples
-    if not s.has_any_top() and not s.is_empty()
-]
-
-fig, ax = plt.subplots(figsize=(8, 4.5))
-ax.hist(feasible_masses, bins=30, alpha=0.5, color="steelblue", edgecolor="black")
-
-# Mark the summaries.
-ax.axvline(nominal_mass, color="gray", linestyle=":", label=f"nominal {nominal_mass:.4f}")
-ax.axvline(res.mean["total_mass"], color="green", linestyle="-", label=f"mean {res.mean['total_mass']:.4f}")
-ax.axvline(res.p95["total_mass"], color="orange", linestyle="-", label=f"p95 {res.p95['total_mass']:.4f}")
-ax.axvline(res.cvar95["total_mass"], color="red", linestyle="-", label=f"CVaR95 {res.cvar95['total_mass']:.4f}")
-ax.axvline(wc, color="black", linestyle="--", label=f"worst case (Box) {wc:.4f}")
-
-ax.set_xlabel("total_mass [kg]")
-ax.set_ylabel("samples")
-ax.set_title("Monte Carlo distribution of total_mass, with summaries")
+ax = viz.plot_uncertainty(res, port="total_mass",
+                          nominal=nominal_mass, bins=30)
+wc = list(res.worst_case.antichain.points)[0]["total_mass"]
+ax.axvline(wc, color="black", linestyle="--",
+           label=f"worst case (Box) {wc:.4f}")
 ax.legend(loc="upper left", fontsize=9)
+ax.set_title("Monte Carlo distribution of total_mass, with summaries")
 plt.tight_layout()
 plt.show()"""),
     ("md", """## Reading the chart
@@ -1294,6 +1292,392 @@ plt.show()"""),
 - **worst case (Box)** is the deterministic upper bound from the set-based analysis. Slightly above CVaR95 because the Box admits the implausible corner.
 
 A natural ordering emerges: `nominal < mean < p95 < CVaR95 < worst_case`. For a normal-design specification you'd usually report the p95 or CVaR95; the worst case is the right answer when failures truly mean disaster.
+"""),
+]
+
+
+# ---------------------------------------------------------------------------
+# 13 The microgrid flagship: cycles + warm-start + uncertainty + viz
+# ---------------------------------------------------------------------------
+
+NB_13 = [
+    ("md", """# 13. Microgrid: a flagship case study
+
+An off-grid cabin must supply its daily energy and peak load without grid power. Four subsystems contribute:
+
+- a **solar PV array** (cheap when the sun shines, but the sun is stochastic);
+- a **lithium battery** with a discrete chemistry choice (LFP, NMC, LCO, NaIon);
+- a **diesel generator** (reliable but carbon-heavy);
+- a **structural frame** whose mass and cost scale with the total mass it must support, *including its own*, producing a genuine fixed-point coupling.
+
+This notebook brings together every feature of the package: cyclic dependencies, parameter sweeps with solver warm-start, stochastic uncertainty on the sun, and the new visualisation helpers in `codesign.viz`.
+"""),
+    ("md", "## Modules"),
+    ("code", """from codesign import Module, Reals, Stochastic, System, solve, viz
+from scipy import stats
+import numpy as np
+
+
+class SolarArray(Module):
+    F = {"peak_power_kw": Reals(unit="kW"),
+         "daily_energy_kwh": Reals(unit="kWh")}
+    R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg")}
+
+    def __init__(self, cost_per_kw=1100.0, mass_per_kw=28.0,
+                 sun_hours_per_day=3.0):
+        self.cost_per_kw = cost_per_kw
+        self.mass_per_kw = mass_per_kw
+        self.sun_hours_per_day = sun_hours_per_day
+        super().__init__()
+
+    def h(self, f):
+        sun = max(self.sun_hours_per_day, 1e-6)
+        required_peak = max(f["peak_power_kw"],
+                            f["daily_energy_kwh"] / sun)
+        return {"cost_usd": required_peak * self.cost_per_kw,
+                "mass_kg":  required_peak * self.mass_per_kw}
+
+
+class Battery(Module):
+    F = {"storage_kwh": Reals(unit="kWh")}
+    R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg"),
+         "replacements": Reals()}
+    CHEMISTRIES = {
+        "LFP":   (160.0, 130.0, 4000.0),
+        "NMC":   (240.0, 175.0, 2000.0),
+        "LCO":   (220.0, 180.0,  800.0),
+        "NaIon": (110.0,  90.0, 3000.0),
+    }
+    def __init__(self, chemistry="LFP", daily_cycles=1.0, life_years=10.0):
+        wh_kg, usd_kwh, life = self.CHEMISTRIES[chemistry]
+        self.chemistry = chemistry
+        self.specific_energy = wh_kg
+        self.cost_density = usd_kwh
+        self.cycle_life = life
+        self.daily_cycles = daily_cycles
+        self.life_years = life_years
+        super().__init__()
+
+    def h(self, f):
+        kwh = f["storage_kwh"]
+        reps = (self.daily_cycles * 365.0 * self.life_years) / max(self.cycle_life, 1.0)
+        return {"cost_usd": kwh * self.cost_density * (1.0 + reps),
+                "mass_kg":  kwh * 1000.0 / max(self.specific_energy, 1e-6),
+                "replacements": reps}
+
+
+class DieselGenerator(Module):
+    F = {"backup_power_kw": Reals(unit="kW"),
+         "backup_hours":    Reals(unit="h")}
+    R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg"),
+         "co2_kg":   Reals(unit="kg")}
+    def __init__(self, cost_per_kw=500.0, mass_per_kw=40.0,
+                 fuel_cost_per_kwh=0.35, co2_per_kwh=0.95):
+        self.cost_per_kw = cost_per_kw
+        self.mass_per_kw = mass_per_kw
+        self.fuel_cost_per_kwh = fuel_cost_per_kwh
+        self.co2_per_kwh = co2_per_kwh
+        super().__init__()
+    def h(self, f):
+        kw = f["backup_power_kw"]
+        hrs = f["backup_hours"]
+        kwh = kw * hrs
+        capital = kw * self.cost_per_kw
+        fuel = kwh * self.fuel_cost_per_kwh * 30.0  # 30 days/month
+        return {"cost_usd": capital + fuel,
+                "mass_kg":  kw * self.mass_per_kw,
+                "co2_kg":   kwh * self.co2_per_kwh * 30.0}
+
+
+class Frame(Module):
+    F = {"supported_mass_kg": Reals(unit="kg")}
+    R = {"cost_usd": Reals(unit="USD"), "mass_kg": Reals(unit="kg")}
+    def h(self, f):
+        m = f["supported_mass_kg"] * 0.18
+        return {"cost_usd": m * 6.0, "mass_kg": m}"""),
+
+    ("md", """## Building the system
+
+The frame's mass depends on the total supported mass *including the frame itself*. The Kleene iteration handles this cycle automatically.
+"""),
+    ("code", """def make_microgrid(*, chemistry="LFP", sun_hours_per_day=3.0,
+                   solar_fraction=0.85, uncertainty=False):
+    solar = SolarArray(sun_hours_per_day=sun_hours_per_day)
+    if uncertainty:
+        solar.uncertain_dist = Stochastic(
+            marginals={"sun_hours_per_day":
+                stats.truncnorm(a=-1.5, b=1.5,
+                                loc=sun_hours_per_day, scale=1.0)},
+        )
+    sys = System(f"microgrid_{chemistry}")
+    daily_load = sys.provides("daily_load_kwh", unit="kWh")
+    peak_load  = sys.provides("peak_load_kw",   unit="kW")
+    backup_h   = sys.provides("backup_hours",   unit="h")
+    total_cost = sys.requires("total_cost_usd", unit="USD")
+    total_mass = sys.requires("total_mass_kg",  unit="kg")
+    annual_co2 = sys.requires("annual_co2_kg",  unit="kg/yr")
+    s = sys.add("solar",   solar)
+    b = sys.add("battery", Battery(chemistry=chemistry))
+    d = sys.add("diesel",  DieselGenerator())
+    fr = sys.add("frame",  Frame())
+    s.daily_energy_kwh >= daily_load * solar_fraction
+    s.peak_power_kw    >= peak_load
+    b.storage_kwh      >= daily_load * solar_fraction
+    d.backup_power_kw  >= peak_load
+    d.backup_hours     >= backup_h
+    fr.supported_mass_kg >= s.mass_kg + b.mass_kg + d.mass_kg + fr.mass_kg
+    total_cost >= s.cost_usd + b.cost_usd + d.cost_usd + fr.cost_usd
+    total_mass >= s.mass_kg + b.mass_kg + d.mass_kg + fr.mass_kg
+    annual_co2 >= d.co2_kg * (365.0 / 30.0)
+    return sys.build()
+
+
+mission = {"daily_load_kwh": 15.0, "peak_load_kw": 3.0, "backup_hours": 12.0}"""),
+
+    ("md", "## Compare the four chemistries"),
+    ("code", """for chem in ["LFP", "NMC", "LCO", "NaIon"]:
+    r = solve(make_microgrid(chemistry=chem), mission, max_iter=400)
+    p = list(r.antichain.points)[0]
+    print(f"{chem:<6} cost=${p['total_cost_usd']:>8.0f}  "
+          f"mass={p['total_mass_kg']:>6.1f} kg  "
+          f"CO2={p['annual_co2_kg']:>6.1f} kg/yr  "
+          f"(iters={r.iterations})")"""),
+    ("md", """A clear tradeoff: NaIon is cheapest but heaviest, LFP is the all-rounder, LCO is the priciest (short life means it pays for replacements). The frame's cyclic dependence forces the iteration to do real work; iteration counts in the 20-25 range are typical."""),
+
+    ("md", """## Convergence trace with `viz.plot_convergence`
+
+One call to render the delta-vs-iteration semilog.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+dp = make_microgrid(chemistry="LFP")
+r = solve(dp, mission, max_iter=400, trace=True)
+ax = viz.plot_convergence(r)
+ax.set_title(f"Microgrid (LFP): converged in {r.iterations} Kleene steps")
+plt.tight_layout()
+plt.show()"""),
+
+    ("md", """## Warm-started parameter sweep
+
+Sweeping `daily_load_kwh` from 5 to 30 kWh in 50 steps. Warm-starting each solve from the previous fixed point saves Kleene iterations: the answer at 15.5 kWh is a good seed for 16.0 kWh.
+"""),
+    ("code", """dp = make_microgrid(chemistry="LFP")
+loads = np.linspace(5.0, 30.0, 50)
+
+cold_iters = 0
+for L in loads:
+    f = {"daily_load_kwh": float(L), "peak_load_kw": 3.0, "backup_hours": 12.0}
+    r = solve(dp, f, max_iter=400)
+    cold_iters += r.iterations
+
+warm_iters = 0
+prev = None
+for L in loads:
+    f = {"daily_load_kwh": float(L), "peak_load_kw": 3.0, "backup_hours": 12.0}
+    r = solve(dp, f, max_iter=400, start_from=prev)
+    warm_iters += r.iterations
+    prev = r
+
+print(f"cold total iters: {cold_iters}")
+print(f"warm total iters: {warm_iters}")
+print(f"speedup: {cold_iters / max(warm_iters, 1):.2f}x")"""),
+
+    ("md", """## Stochastic sun hours
+
+The sun is treated as a truncated-normal random variable around 3 hours/day. A Monte-Carlo solve over 200 samples gives the cost distribution, plus mean, p95, CVaR95.
+"""),
+    ("code", """dp_u = make_microgrid(chemistry="LFP", uncertainty=True)
+res_u = solve(dp_u, mission,
+              uncertainty=["mean", "p95", "cvar95", "samples"],
+              n_samples=200, rng_seed=42, max_iter=400)
+nominal = solve(make_microgrid(chemistry="LFP"), mission, max_iter=400)
+nominal_cost = list(nominal.antichain.points)[0]["total_cost_usd"]
+print(f"Nominal cost: ${nominal_cost:.0f}")
+print(f"Mean cost (MC): ${res_u.mean['total_cost_usd']:.0f}")
+print(f"p95 cost: ${res_u.p95['total_cost_usd']:.0f}")
+print(f"CVaR95 cost: ${res_u.cvar95['total_cost_usd']:.0f}")
+print(f"Feasibility rate: {res_u.feasibility_rate:.3f}")"""),
+
+    ("md", """## Distribution plot with `viz.plot_uncertainty`
+
+Histogram of cost across MC samples, with summary lines.
+"""),
+    ("code", """ax = viz.plot_uncertainty(res_u, port="total_cost_usd",
+                          nominal=nominal_cost, bins=25)
+ax.set_xlabel("total cost (USD)")
+ax.set_title("Cost distribution under stochastic sun hours")
+plt.tight_layout()
+plt.show()"""),
+
+    ("md", """## System structure as a graph
+
+`viz.to_dot` returns a GraphViz dot string showing modules and the constraints linking them. Useful for documentation, less so for solving.
+"""),
+    ("code", """dot = viz.to_dot(dp, name="microgrid")
+print(dot[:500] + "..." if len(dot) > 500 else dot)"""),
+
+    ("md", """## What this notebook used
+
+| Feature | Where |
+|---|---|
+| `Module` classes | four subsystems |
+| Cyclic constraints | frame depends on its own mass |
+| Warm-start (`start_from=`) | parameter sweep, ~10% faster |
+| `Stochastic` + MC summaries | sun-hours uncertainty |
+| `viz.plot_convergence` | delta-vs-iteration |
+| `viz.plot_uncertainty` | MC cost distribution |
+| `viz.to_dot` | system structure as GraphViz dot |
+
+The microgrid is a realistic engineering scenario where MCDP's monotone structure pays off: real cycles, multiple objectives, and uncertainty are handled by the same `solve` call.
+"""),
+]
+
+
+# ---------------------------------------------------------------------------
+# 14 Online elimination: heterogeneous robot fleet
+# ---------------------------------------------------------------------------
+
+NB_14 = [
+    ("md", """# 14. Online elimination-based co-design
+
+When a co-design problem has many discrete candidates (catalog entries, robot types, component families) and each candidate's inner solve is non-trivial, evaluating every one is wasteful. The `codesign.online` module implements the elimination-based solver from Alharbi, Dahleh & Zardini (2026): maintain *optimistic bounds* on each candidate's inner-solve output, evaluate the most promising one, then prune any candidate whose lower bound is already dominated by what we know.
+
+This notebook reproduces the spirit of the multi-robot fleet case study. A logistics service must hit a target throughput over a target range, and can buy robots from a catalog of N=200 candidate types. We solve it three ways:
+
+- **Lipschitz**: the most general assumption (bounded variation), the most reliable, modest pruning.
+- **Monotonicity**: cheapest when applicable; needs a feature under which the output is genuinely monotone.
+- **LinearParametric**: aggressive but riskier; fits a linear model and prunes by its confidence band.
+"""),
+
+    ("md", "## The problem"),
+    ("code", """import math, random
+from codesign import (
+    AlgebraicDP, Reals, NamedProduct, solve,
+    solve_online, LipschitzEvaluator,
+    MonotonicityEvaluator, LinearParametricEvaluator,
+)
+
+F = NamedProduct({"target_throughput": Reals(unit="pkg/h"),
+                  "target_range":      Reals(unit="km")})
+R = NamedProduct({"total_cost":   Reals(unit="USD"),
+                  "total_energy": Reals(unit="kWh/day")})
+
+def make_dp(robot):
+    s = robot["speed"]; p = robot["payload"]
+    c = robot["unit_cost"]; e = robot["energy_per_km"]
+    capacity = s * p  # pkg/h per robot
+    return AlgebraicDP(F, R, {
+        "total_cost":   lambda f, cap=capacity, uc=c: (f["target_throughput"]/cap) * uc,
+        "total_energy": lambda f, ek=e: f["target_range"] * ek * 24.0,
+    })"""),
+
+    ("md", "## The catalog (200 robot types)"),
+    ("code", """def make_catalog(n=200, seed=42):
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        s = rng.uniform(5, 30); p = rng.uniform(1, 20)
+        c = rng.uniform(500, 5000); e = rng.uniform(0.05, 0.5)
+        out.append({"name": f"r{i:03d}",
+                    "speed": s, "payload": p,
+                    "unit_cost": c, "energy_per_km": e,
+                    "cost_per_capacity": c / (s * p)})  # monotone-friendly feature
+    return out
+
+candidates = make_catalog()
+mission = {"target_throughput": 100.0, "target_range": 50.0}
+print(f"{len(candidates)} candidate robot types")"""),
+
+    ("md", """## Exhaustive baseline
+
+Every catalog entry gets solved; we record the true Pareto front for reference.
+"""),
+    ("code", """points = []
+for c in candidates:
+    a = solve(make_dp(c), mission).antichain
+    pt = dict(list(a.points)[0]); pt["name"] = c["name"]
+    points.append(pt)
+
+pareto = []
+for p in points:
+    dominated = any(
+        q["total_cost"] <= p["total_cost"] and q["total_energy"] <= p["total_energy"]
+        and (q["total_cost"] < p["total_cost"] or q["total_energy"] < p["total_energy"])
+        for q in points
+    )
+    if not dominated:
+        pareto.append(p)
+pareto.sort(key=lambda x: x["total_cost"])
+print(f"True Pareto front: {len(pareto)} non-dominated robot types")
+for p in pareto:
+    print(f"  {p['name']}: cost={p['total_cost']:7.2f}, energy={p['total_energy']:6.2f}")"""),
+
+    ("md", """## Online with three evaluators
+
+Each evaluator encodes a different prior belief about how candidate features relate to the inner-solve output.
+"""),
+    ("code", """evs = [
+    ("Lipschitz", LipschitzEvaluator(
+        features=["speed", "payload", "unit_cost", "energy_per_km"],
+        r_components=["total_cost", "total_energy"],
+        L={"total_cost": 300.0, "total_energy": 30.0},
+    )),
+    ("Monotonicity", MonotonicityEvaluator(
+        features=["cost_per_capacity", "energy_per_km"],
+        r_components=["total_cost", "total_energy"],
+    )),
+    ("LinearParametric", LinearParametricEvaluator(
+        features=["speed", "payload", "unit_cost", "energy_per_km"],
+        r_components=["total_cost", "total_energy"],
+        confidence=3.0, min_obs=5,
+    )),
+]
+results = []
+for name, ev in evs:
+    res = solve_online(make_dp, mission, candidates=candidates, evaluator=ev)
+    results.append((name, res))
+    print(f"{name:<18}: {res.n_evaluated:>3} evals, {res.n_eliminated:>3} eliminated, "
+          f"antichain size {len(res.antichain)}")"""),
+
+    ("md", """## Visualising the elimination cascade
+
+Plotting the catalog in feature space, coloured by status. Stars mark the true Pareto front.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+pareto_names = {p["name"] for p in pareto}
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+for ax, (label, res) in zip(axes, results):
+    evaluated  = {candidates[i]["name"] for i in res.evaluated_ids}
+    eliminated = {candidates[i]["name"] for i in res.eliminated_ids}
+    xe, ye, xx, yx, xp, yp = [], [], [], [], [], []
+    for c in candidates:
+        x, y = c["cost_per_capacity"], c["energy_per_km"]
+        if c["name"] in pareto_names: xp.append(x); yp.append(y)
+        elif c["name"] in evaluated: xe.append(x); ye.append(y)
+        elif c["name"] in eliminated: xx.append(x); yx.append(y)
+    ax.scatter(xx, yx, c="lightgrey", s=18, label=f"eliminated ({len(eliminated)})", edgecolor="none")
+    ax.scatter(xe, ye, c="steelblue", s=22, label=f"evaluated ({len(evaluated) - len(pareto_names & evaluated)})", edgecolor="none")
+    ax.scatter(xp, yp, c="crimson", s=55, marker="*", label=f"Pareto-optimal ({len(pareto_names)})", edgecolor="black", linewidth=0.5)
+    ax.set_xlabel("cost_per_capacity")
+    ax.set_ylabel("energy_per_km")
+    ax.set_title(label)
+    ax.legend(fontsize=8); ax.grid(alpha=0.3)
+fig.suptitle("Online elimination across 200 candidates")
+fig.tight_layout()
+plt.show()"""),
+
+    ("md", """## Reading the picture
+
+- **Lipschitz** is conservative: with the L values we picked, almost every candidate gets evaluated. The pruning rate is modest because the Lipschitz bound only tightens by `L * distance` around each observation, so distant candidates remain plausible.
+- **Monotonicity** is aggressive: because `cost_per_capacity` is genuinely monotone-related to `total_cost` (it's literally proportional), one observation eliminates everything with strictly worse features. Most of the catalog gets ruled out within a dozen evaluations.
+- **LinearParametric** falls in between. The linear model converges quickly on a fit, but the confidence band can be too tight when the true relationship is nonlinear, so it can wrongly eliminate a Pareto candidate. In the run above, this is what causes the smaller antichain.
+
+The choice between evaluators is a classical bias-variance tradeoff: stronger structural assumptions mean fewer evaluations needed, but more risk of wrongly pruning. In production code the safe default is Lipschitz with a conservative L; switch to monotonicity only when you can verify the feature is genuinely monotone.
+
+## Where this matters
+
+This example uses a smooth analytic inner solve, so each evaluation is cheap and the speedup is mostly pedagogical. The real payoff appears when each inner solve is itself expensive: a multi-stage MILP, a system identification, or a co-design problem with cycles. With a 1000-entry catalog and a 100ms inner solve, going from 1000 to 50 evaluations is the difference between 100 seconds and 5.
 """),
 ]
 
@@ -1317,6 +1701,8 @@ def main():
         ("10_solver_trace.ipynb", NB_10),
         ("11_uncertain_drone.ipynb", NB_11),
         ("12_stochastic_drone.ipynb", NB_12),
+        ("13_microgrid.ipynb", NB_13),
+        ("14_online_fleet.ipynb", NB_14),
     ]
     for name, cells in plan:
         write(name, cells)

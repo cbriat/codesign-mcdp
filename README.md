@@ -220,6 +220,8 @@ payload), the iteration drives the loop variable to ⊤ and the result reports
 * `10_solver_trace.py` – the solver's observability features: `trace`, `verbose`, `on_iteration` callback, and the `status` field.
 * `11_uncertain_drone.py` – set-based deterministic uncertainty on internal parameters: worst case under a `Box` and an `Ellipsoid`.
 * `12_stochastic_drone.py` – Monte Carlo with a Gaussian copula, returning worst-case + mean + p95 + CVaR95 from a single solve call.
+* `13_microgrid.py` – flagship case study: solar + battery + diesel + frame with cyclic coupling, warm-started parameter sweep, stochastic sun hours, and the full visualisation suite.
+* `14_online_fleet.py` – online elimination-based co-design over a 200-candidate robot catalog using three flavours of optimistic evaluator.
 
 Run any of them with `python -m examples.NN_name`. The visualization example
 also needs matplotlib (`pip install matplotlib`).
@@ -356,6 +358,63 @@ result.feasibility_rate  # fraction of MC samples that came back feasible
 ```
 
 The uncertainty sets supported in v1 are `Box` (n-D, axis-aligned), `Ellipsoid` (n-D, possibly tilted), plus the 2D conveniences `Disk` and `Circle`. Stochastic dependence is described by a `Copula` (`Independence` by default, `GaussianCopula(correlation=...)` for correlated marginals). Each `Box`/`Ellipsoid` parameter can be declared with a "direction of badness" (`"more_is_better"`, `"more_is_worse"`, etc.); declared directions enable an analytic worst-case computation, undeclared directions trigger a boundary search.
+
+## Online learning
+
+When a co-design problem has many discrete candidates (catalog entries, robot types, component families) and each candidate's inner solve is non-trivial, evaluating every one is wasteful. The `codesign.online` module implements the elimination-based solver from Alharbi, Dahleh & Zardini (arXiv:2604.22624): maintain *optimistic bounds* on each candidate's inner-solve output, evaluate the most promising one, then prune any candidate whose lower bound is already dominated by the incumbent.
+
+```python
+from codesign import (
+    solve_online, LipschitzEvaluator,
+    MonotonicityEvaluator, LinearParametricEvaluator,
+)
+
+# `candidate_fn(robot) -> DP` builds the inner DP for one robot type;
+# `candidates` is a list of feature dicts (one per robot type).
+ev = LipschitzEvaluator(
+    features=["speed", "payload", "unit_cost"],
+    r_components=["total_cost"],
+    L={"total_cost": 300.0},   # or a scalar L
+)
+result = solve_online(
+    candidate_fn, mission,
+    candidates=candidates,
+    evaluator=ev,
+    budget=50,                  # max inner solves; None = unbounded
+)
+
+result.antichain         # Min over the evaluated, surviving candidates
+result.n_evaluated       # actual inner solves performed
+result.n_eliminated      # candidates pruned without evaluation
+result.evaluated_ids     # indices into `candidates` that were evaluated
+result.eliminated_ids    # indices pruned by the bound
+result.incumbent_ids     # indices whose evaluation contributed to the final antichain
+result.history           # per-iteration log: pick, antichain, remaining, evaluated, eliminated
+```
+
+Three evaluators are provided out of the box:
+
+* `LipschitzEvaluator(features, r_components, L)` — bounds tighten by `L * ||features|` around each observation. Safe default: with a sensible `L` it never prunes a Pareto-optimal candidate.
+* `MonotonicityEvaluator(features, r_components)` — assumes the output is component-wise monotone in the features. Aggressive when applicable (often dozens of evaluations instead of thousands), but only correct if monotonicity genuinely holds.
+* `LinearParametricEvaluator(features, r_components, confidence, min_obs)` — fits a running OLS model with a confidence band. Fastest in practice but can wrongly prune when the linear assumption breaks.
+
+Subclass `OptimisticEvaluator` for custom assumptions; the only method to override is `bound(candidate) -> (lower, upper)` mapping each R component to its current lower and upper bound.
+
+## Visualisation
+
+The `codesign.viz` module provides four matplotlib- and GraphViz-based helpers, all importable from the top-level `codesign` namespace:
+
+```python
+from codesign import viz
+
+ax = viz.plot_antichain(result, axes=["mass", "cost"])    # 2D or 3D Pareto scatter
+ax = viz.plot_convergence(result)                          # delta-vs-iteration on log axis
+ax = viz.plot_uncertainty(unc_result, port="total_mass",   # histogram with summaries
+                          nominal=nominal_mass)
+dot = viz.to_dot(dp, name="my_dp")                         # System structure as GraphViz dot
+```
+
+Each helper accepts an existing matplotlib axes (`ax=...`) for composition into larger figures. `to_dot` returns a string suitable for piping into `dot -Tpng` or pasting into [graphviz online](https://dreampuf.github.io/GraphvizOnline/).
 
 ## How the solver works
 

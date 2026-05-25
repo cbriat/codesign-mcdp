@@ -379,11 +379,13 @@ class System:
         )
         if not modules:
             inner._codesign_modules = {}
+            inner._codesign_constraints = list(self._constraints)
             return inner
         result = Loop(inner, axis=_MODULES_AXIS)
         # Attach a reference to the modules dict so the uncertainty solver
         # (and other tooling) can find the Module instances after build().
         result._codesign_modules = dict(modules)
+        result._codesign_constraints = list(self._constraints)
         return result
 
     # ------------------------------------------------------------------ #

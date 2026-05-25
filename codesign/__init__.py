@@ -49,6 +49,15 @@ from .uncertainty import (
     UncertaintySet,
     solve_with_uncertainty,
 )
+from .online import (
+    LinearParametricEvaluator,
+    LipschitzEvaluator,
+    MonotonicityEvaluator,
+    OnlineResult,
+    OptimisticEvaluator,
+    solve_online,
+)
+from . import viz
 
 __all__ = [
     "Reals", "Naturals", "Discrete", "NamedProduct", "Poset",
@@ -63,4 +72,6 @@ __all__ = [
     "Box", "Disk", "Circle", "Ellipsoid",
     "Stochastic", "GaussianCopula", "Independence",
     "UncertaintySet", "UncertaintyResult", "solve_with_uncertainty",
+    "OptimisticEvaluator", "MonotonicityEvaluator", "LipschitzEvaluator",
+    "LinearParametricEvaluator", "OnlineResult", "solve_online",
 ]
