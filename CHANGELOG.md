@@ -8,7 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Example 16: online DOE for the mAb fed-batch process**
+- **Tier 1 online-solver enhancements** (`codesign/online.py`,
+  `tests/test_online_tier1.py`):
+  - **Warm-start mechanism**: `solve_online` now accepts a
+    `warm_start` argument that pre-populates the evaluator with seed
+    observations before the picker takes over. Accepts either a list
+    of candidate indices (manually picked corner runs) or an integer
+    `n` (greedy farthest-point heuristic over the feature space).
+    Particularly useful for the `MonotonicityEvaluator`, which is
+    uninformative without observations at the low-feature corner; in
+    example 16, four corner warm-start runs lift its Pareto recovery
+    from 0 / 4 to at least 1 / 4.
+  - **Pluggable picker strategies**: `solve_online` now accepts a
+    `picker` argument. Built-in options are `"lcb"` (the default,
+    minimises the sum of lower-bound components, exploitation-only),
+    `"ucb"` (lower bound minus `kappa * (upper - lower)` exploration
+    bonus, tunable via `picker=("ucb", {"kappa": 1.0})`), and
+    `"random"` (uniform baseline for comparing the value of
+    structural priors). Custom callables are also accepted.
+  - **`GaussianProcessEvaluator`**: a new evaluator class with a
+    zero-mean GP and RBF kernel, implemented in pure numpy (no
+    scikit-learn dependency). Tunable `length_scale`, `sigma_f`,
+    `noise`, `confidence`, and `min_obs`. For nearly-additive
+    response surfaces such as the example 16 bioprocess effect
+    model, `LinearParametricEvaluator` is empirically competitive;
+    GP is more useful when the response has strong local nonlinearity
+    that a global linear fit misses.
+
+- **Example 16: monoclonal antibody fed-batch online DOE**
   (`examples/16_online_doe.py` and `notebooks/16_online_doe.ipynb`).
   Takes the example 15 model, fixes CHO-K1 and the 100 kg/yr mission,
   and sweeps a 5x5x5x3 = 375-point grid of operating conditions

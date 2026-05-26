@@ -294,6 +294,146 @@ class LinearParametricEvaluator(OptimisticEvaluator):
         return lo, hi
 
 
+class GaussianProcessEvaluator(OptimisticEvaluator):
+    """Bounds from a Gaussian process surrogate with an RBF kernel.
+
+    For each R component k we fit a zero-mean GP
+
+        h_k(c) ~ GP(0, sigma_f^2 RBF(c, c'; ell))
+
+    on observed (features, summary) pairs. The bound at an unobserved
+    query is ``mean +/- confidence * sigma``. The implementation is
+    pure-numpy (no scikit-learn dependency); for typical small N (a
+    few dozen observations) and a few-dimensional feature space the
+    cost of refitting on every ``bound`` call is negligible.
+
+    Hyperparameters
+    ---------------
+    length_scale : float
+        Kernel length scale, applied uniformly across features. Tune to
+        the typical "smoothness" of the response surface relative to
+        the normalised feature span; a starting value of 0.3 is
+        appropriate for features in roughly [0, 1].
+    sigma_f : float
+        Kernel signal amplitude. The default of 1.0 is rescaled
+        per-output by the empirical standard deviation of the
+        observations, so users rarely need to tune this directly.
+    noise : float
+        Observation noise variance (jitter). Stabilises the Cholesky
+        factor and accommodates a small amount of unexplained variation
+        in the inner-solve output. Default ``1e-3`` works in practice;
+        increase to 1e-2 if observations look genuinely noisy.
+    confidence : float
+        Multiplier on the predictive standard deviation. The
+        ``confidence=2.0`` default corresponds to a roughly 95%
+        coverage band assuming Gaussian residuals.
+    min_obs : int
+        Minimum number of observations before the GP returns non-trivial
+        bounds. Below this the evaluator returns the fallback ``(0, inf)``.
+    """
+
+    def __init__(self, features, r_components,
+                 length_scale=0.3, sigma_f=1.0, noise=1e-3,
+                 confidence=2.0, min_obs=3):
+        super().__init__(features, r_components)
+        self.length_scale = float(length_scale)
+        self.sigma_f = float(sigma_f)
+        self.noise = float(noise)
+        self.confidence = float(confidence)
+        self.min_obs = int(min_obs)
+        # Cache the last fit so successive bound() calls in the same
+        # solve iteration don't refit redundantly.
+        self._fit_cache_n = -1
+        self._fit_cache: Dict[str, Tuple[Any, Any, Any, float, float]] = {}
+
+    def _rbf(self, X1, X2):
+        np = _import_numpy()
+        # ||x1 - x2||^2 = ||x1||^2 + ||x2||^2 - 2 x1 . x2
+        sq1 = (X1 ** 2).sum(axis=1)[:, None]
+        sq2 = (X2 ** 2).sum(axis=1)[None, :]
+        d2 = sq1 + sq2 - 2.0 * X1 @ X2.T
+        d2 = np.maximum(d2, 0.0)
+        return self.sigma_f ** 2 * np.exp(-0.5 * d2 / self.length_scale ** 2)
+
+    def _refit(self):
+        """Cache Cholesky factor and alpha vector for every R component."""
+        np = _import_numpy()
+        n = len(self._obs)
+        if n == self._fit_cache_n and self._fit_cache:
+            return
+        X = np.array([o.features for o in self._obs], dtype=float)
+        # Common kernel matrix.
+        K = self._rbf(X, X) + self.noise * np.eye(n)
+        try:
+            L = np.linalg.cholesky(K)
+        except np.linalg.LinAlgError:
+            # Bump jitter and retry once.
+            L = np.linalg.cholesky(K + 1e-6 * np.eye(n))
+        self._fit_cache = {}
+        for k in self.r_components:
+            y = np.array([o.summary.get(k, float("nan")) for o in self._obs],
+                         dtype=float)
+            mask = np.isfinite(y)
+            if mask.sum() < self.min_obs:
+                continue
+            # Zero-mean GP: centre y at empirical mean, scale by std.
+            y_mean = float(y[mask].mean())
+            y_std = float(y[mask].std())
+            if y_std < 1e-12:
+                y_std = 1.0
+            y_centred = (y - y_mean) / y_std
+            # Refit just this output with possibly-masked observations.
+            if mask.sum() < n:
+                Xk = X[mask]
+                Kk = self._rbf(Xk, Xk) + self.noise * np.eye(mask.sum())
+                try:
+                    Lk = np.linalg.cholesky(Kk)
+                except np.linalg.LinAlgError:
+                    Lk = np.linalg.cholesky(Kk + 1e-6 * np.eye(mask.sum()))
+                alpha_k = np.linalg.solve(Lk.T,
+                                          np.linalg.solve(Lk, y_centred[mask]))
+                self._fit_cache[k] = (Xk, alpha_k, Lk, y_mean, y_std)
+            else:
+                alpha = np.linalg.solve(L.T, np.linalg.solve(L, y_centred))
+                self._fit_cache[k] = (X, alpha, L, y_mean, y_std)
+        self._fit_cache_n = n
+
+    def observe(self, candidate_id, candidate, antichain):
+        super().observe(candidate_id, candidate, antichain)
+        # Invalidate cache; will refit lazily on next bound().
+        self._fit_cache_n = -1
+
+    def bound(self, candidate):
+        np = _import_numpy()
+        feat = np.array([_feature_vector(candidate, self.features)],
+                        dtype=float)
+        lo = {k: 0.0 for k in self.r_components}
+        hi = {k: float("inf") for k in self.r_components}
+        if len(self._obs) < self.min_obs:
+            return lo, hi
+        self._refit()
+        for k in self.r_components:
+            if k not in self._fit_cache:
+                continue
+            Xk, alpha, L, y_mean, y_std = self._fit_cache[k]
+            k_star = self._rbf(feat, Xk)
+            mu_centred = float((k_star @ alpha)[0])
+            # Predictive variance: k(x*, x*) - k_star K^{-1} k_star^T
+            v = np.linalg.solve(L, k_star.T)
+            var = self.sigma_f ** 2 - float((v * v).sum())
+            sigma_centred = float(np.sqrt(max(var, 0.0)))
+            # Rescale to the original output scale.
+            pred = mu_centred * y_std + y_mean
+            sigma = sigma_centred * y_std
+            lower_k = max(0.0, pred - self.confidence * sigma)
+            upper_k = pred + self.confidence * sigma
+            if lower_k > lo[k]:
+                lo[k] = lower_k
+            if upper_k < hi[k]:
+                hi[k] = upper_k
+        return lo, hi
+
+
 # ===========================================================================
 # Online solver
 # ===========================================================================
@@ -343,21 +483,96 @@ class OnlineResult:
                 f")")
 
 
-def _ucb_score(lower_bound: Mapping[str, float],
-               r_components: Sequence[str]) -> float:
-    """Lower-confidence-bound score for picking the next candidate.
+def _picker_lcb(lo: Mapping[str, float], hi: Mapping[str, float],
+                r_components: Sequence[str], **_kwargs) -> float:
+    """Lower-confidence-bound: sum of finite lower-bound components.
 
-    For minimisation problems the most "optimistic" candidate is the one
-    whose lower bound is smallest, i.e. the one most likely to improve
-    the incumbent. We return the sum of finite lower-bound components
-    (cheap, basis-aware scoring that matches the antichain comparisons).
+    For minimisation the most optimistic candidate has the smallest
+    lower bound. This is the default strategy and matches the
+    behaviour of the original solver.
     """
     s = 0.0
     for k in r_components:
-        v = lower_bound.get(k, 0.0)
+        v = lo.get(k, 0.0)
         if math.isfinite(v):
             s += v
     return s
+
+
+def _picker_ucb(lo: Mapping[str, float], hi: Mapping[str, float],
+                r_components: Sequence[str], *, kappa: float = 0.5,
+                **_kwargs) -> float:
+    """Lower bound minus an exploration bonus weighted by uncertainty.
+
+    The bonus ``kappa * (hi - lo)`` favours candidates whose bounds are
+    still wide. With ``kappa = 0`` this collapses to pure LCB; with
+    large ``kappa`` it approaches pure exploration. ``kappa = 0.5`` is
+    a reasonable default for normalised-output problems; larger values
+    are appropriate when the response surface has many local optima.
+    """
+    s = 0.0
+    for k in r_components:
+        lk = lo.get(k, 0.0)
+        hk = hi.get(k, float("inf"))
+        if not math.isfinite(lk):
+            continue
+        width = (hk - lk) if math.isfinite(hk) else 0.0
+        s += lk - kappa * width
+    return s
+
+
+def _picker_random(lo: Mapping[str, float], hi: Mapping[str, float],
+                   r_components: Sequence[str], *, rng=None,
+                   **_kwargs) -> float:
+    """Uniform-random picker: returns a uniform sample as the score.
+
+    Useful as a baseline for comparing the value of structural priors.
+    """
+    if rng is None:
+        import random as _random
+        return _random.random()
+    return rng.random()
+
+
+_PICKERS = {
+    "lcb":    _picker_lcb,
+    "ucb":    _picker_ucb,
+    "random": _picker_random,
+}
+
+
+def _resolve_picker(picker):
+    """Map a picker spec (string, callable, or None) to a callable.
+
+    Returns ``(score_fn, kwargs)`` where ``kwargs`` is a dict of
+    strategy-specific keyword arguments. If ``picker`` is a tuple
+    ``(name, kwargs)``, the kwargs are forwarded to the score function;
+    e.g. ``picker=("ucb", {"kappa": 1.0})``.
+    """
+    if picker is None or (isinstance(picker, str) and picker == "lcb"):
+        return _picker_lcb, {}
+    if callable(picker):
+        return picker, {}
+    if isinstance(picker, str):
+        if picker not in _PICKERS:
+            raise ValueError(
+                f"unknown picker {picker!r}; "
+                f"choose from {sorted(_PICKERS)} or pass a callable"
+            )
+        return _PICKERS[picker], {}
+    if isinstance(picker, tuple) and len(picker) == 2:
+        name, kwargs = picker
+        if name not in _PICKERS:
+            raise ValueError(f"unknown picker {name!r}")
+        return _PICKERS[name], dict(kwargs)
+    raise TypeError(f"picker must be a string, tuple, or callable, got {type(picker).__name__}")
+
+
+# Backwards-compatible alias for the original score function.
+def _ucb_score(lower_bound: Mapping[str, float],
+               r_components: Sequence[str]) -> float:
+    """Deprecated alias for :func:`_picker_lcb`; kept for backwards compat."""
+    return _picker_lcb(lower_bound, {}, r_components)
 
 
 def _is_dominated_by_incumbent(
@@ -388,6 +603,36 @@ def _is_dominated_by_incumbent(
     return False
 
 
+def _farthest_point_seeds(candidates: Sequence[Mapping[str, Any]],
+                          features: Sequence[str],
+                          n_seeds: int) -> List[int]:
+    """Pick ``n_seeds`` candidate indices that are mutually far apart.
+
+    Greedy farthest-point heuristic on the (unnormalised) feature
+    Euclidean metric: start with the candidate closest to the centroid,
+    then repeatedly add the candidate maximising the minimum distance
+    to the already-picked set. Used by the integer form of the
+    ``warm_start`` argument to produce diverse seed observations.
+    """
+    np = _import_numpy()
+    if n_seeds <= 0 or not candidates:
+        return []
+    n_seeds = min(n_seeds, len(candidates))
+    X = np.array([_feature_vector(c, features) for c in candidates],
+                 dtype=float)
+    centroid = X.mean(axis=0)
+    d_to_centroid = np.linalg.norm(X - centroid, axis=1)
+    picked = [int(np.argmin(d_to_centroid))]
+    while len(picked) < n_seeds:
+        d = np.full(len(candidates), np.inf)
+        for p in picked:
+            di = np.linalg.norm(X - X[p], axis=1)
+            d = np.minimum(d, di)
+        d[picked] = -1.0  # exclude already-picked
+        picked.append(int(np.argmax(d)))
+    return picked
+
+
 def solve_online(
     candidate_fn: Callable[[Mapping[str, Any]], Any],
     functionality: Optional[Mapping],
@@ -397,6 +642,8 @@ def solve_online(
     budget: Optional[int] = None,
     max_iter: int = 200,
     verbose: int = 0,
+    warm_start: Optional[Any] = None,
+    picker: Any = "lcb",
 ) -> OnlineResult:
     """Solve a co-design problem online with elimination-based pruning.
 
@@ -427,6 +674,26 @@ def solve_online(
         Forwarded to each inner solve.
     verbose : int
         0 silent, 1 final summary, 2 per-iteration trace.
+    warm_start : None, int, or list of int, optional
+        Seed observations to populate the evaluator before the picker
+        takes over. ``None`` (default) means no warm-start, matching
+        the original behaviour. An integer ``n`` triggers a greedy
+        farthest-point sampling of ``n`` mutually distant candidates,
+        useful for evaluators (notably :class:`MonotonicityEvaluator`)
+        that need observations spread across the feature space before
+        their bounds become informative. A list of integer indices
+        evaluates exactly those candidates as the seeds, intended for
+        manually specified corner runs.
+    picker : str, tuple, or callable, optional
+        The candidate-selection strategy. Built-in options:
+        ``"lcb"`` (default) minimises the sum of lower-bound
+        components, equivalent to pure exploitation of the optimistic
+        estimate; ``"ucb"`` adds an exploration bonus ``-kappa * (hi -
+        lo)`` summed over R components; ``"random"`` picks uniformly
+        at random. To tune the exploration weight pass a tuple, e.g.
+        ``picker=("ucb", {"kappa": 1.0})``. A custom callable receives
+        ``(lo, hi, r_components, **kwargs)`` and returns a score to
+        minimise.
 
     Returns
     -------
@@ -435,10 +702,22 @@ def solve_online(
     from .solver import solve  # avoid circular import
 
     evaluator.reset()
+    score_fn, picker_kwargs = _resolve_picker(picker)
 
     n_total = len(candidates)
     if budget is None:
         budget = n_total
+
+    # Resolve warm-start spec to a concrete list of indices.
+    warm_ids: List[int] = []
+    if warm_start is not None:
+        if isinstance(warm_start, int):
+            warm_ids = _farthest_point_seeds(
+                candidates, evaluator.features, warm_start)
+        else:
+            warm_ids = [int(i) for i in warm_start]
+        # Truncate so we don't blow the budget on warm-start alone.
+        warm_ids = warm_ids[:budget]
 
     R: Optional[Poset] = None
     incumbent: Optional[Antichain] = None
@@ -447,6 +726,32 @@ def solve_online(
     evaluated_ids: List[int] = []
     eliminated_ids: List[int] = []
     incumbent_ids: List[int] = []
+
+    # ---- Warm-start: evaluate the seed candidates first, in given order.
+    for cid in warm_ids:
+        if cid not in remaining:
+            continue
+        if len(evaluated_ids) >= budget:
+            break
+        remaining.remove(cid)
+        dp = candidate_fn(candidates[cid])
+        if R is None:
+            R = dp.R
+            incumbent = Antichain.empty(R)
+        inner_result = solve(dp, functionality, max_iter=max_iter, verbose=0)
+        evaluated_ids.append(cid)
+        evaluator.observe(cid, candidates[cid], inner_result.antichain)
+        incumbent = Antichain.union_min(R, [incumbent, inner_result.antichain])
+        if verbose >= 2:
+            print(f"[online] warm-start cid={cid} "
+                  f"|incumbent|={len(incumbent)} remaining={len(remaining)}")
+        history.append({
+            "pick": cid, "antichain": incumbent,
+            "remaining": len(remaining),
+            "evaluated": len(evaluated_ids),
+            "eliminated": len(eliminated_ids),
+            "phase": "warm_start",
+        })
 
     while remaining and len(evaluated_ids) < budget:
         # ---- 1. Compute lower bounds, eliminate anything already dominated.
@@ -464,12 +769,12 @@ def solve_online(
             if not remaining:
                 break
 
-        # ---- 2. Pick the most promising remaining candidate by UCB on lo.
+        # ---- 2. Pick the most promising remaining candidate by picker.
         best_cid = remaining[0]
         best_score = float("inf")
         for cid in remaining:
-            lo, _hi = evaluator.bound(candidates[cid])
-            s = _ucb_score(lo, evaluator.r_components)
+            lo, hi = evaluator.bound(candidates[cid])
+            s = score_fn(lo, hi, evaluator.r_components, **picker_kwargs)
             if s < best_score:
                 best_score = s
                 best_cid = cid
@@ -498,6 +803,7 @@ def solve_online(
             "remaining": len(remaining),
             "evaluated": len(evaluated_ids),
             "eliminated": len(eliminated_ids),
+            "phase": "picker",
         })
 
     # The remaining (unevaluated, undominated) candidates ARE eliminated

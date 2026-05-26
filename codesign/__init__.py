@@ -50,6 +50,7 @@ from .uncertainty import (
     solve_with_uncertainty,
 )
 from .online import (
+    GaussianProcessEvaluator,
     LinearParametricEvaluator,
     LipschitzEvaluator,
     MonotonicityEvaluator,
@@ -73,5 +74,6 @@ __all__ = [
     "Stochastic", "GaussianCopula", "Independence",
     "UncertaintySet", "UncertaintyResult", "solve_with_uncertainty",
     "OptimisticEvaluator", "MonotonicityEvaluator", "LipschitzEvaluator",
-    "LinearParametricEvaluator", "OnlineResult", "solve_online",
+    "LinearParametricEvaluator", "GaussianProcessEvaluator",
+    "OnlineResult", "solve_online",
 ]

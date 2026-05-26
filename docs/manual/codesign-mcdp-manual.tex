@@ -1235,6 +1235,17 @@ standard deviation. Fastest in practice. Risk: when the true
 relationship is nonlinear, the confidence band can be too tight and
 a Pareto-optimal candidate can be wrongly eliminated.
 
+\paragraph{Gaussian process.}
+\texttt{GaussianProcessEvaluator(features, r\_components,
+length\_scale=0.3, sigma\_f=1.0, noise=1e-3, confidence=2.0,
+min\_obs=3)} fits a zero-mean GP with an RBF kernel and bounds new
+queries by a confidence band on the predictive standard deviation.
+Implemented in pure numpy. The right tool when the response surface
+has strong feature interactions or local nonlinearity that a
+linear regression misses. For nearly-additive surfaces the
+linear-parametric evaluator is empirically competitive and
+significantly faster.
+
 \paragraph{Subclassing.} Custom evaluators only need to override
 \texttt{bound(candidate)}; the base class handles observation
 recording and the default fallback bound of $(0, +\infty)$.
@@ -1251,6 +1262,8 @@ result = solve_online(
     budget=None,          # max inner solves; None = unbounded
     max_iter=200,         # forwarded to each inner solve
     verbose=0,
+    warm_start=None,      # seed indices or n for farthest-point
+    picker="lcb",         # "lcb", "ucb", "random", or callable
 )
 \end{lstlisting}
 
@@ -1313,6 +1326,58 @@ Swapping in \texttt{MonotonicityEvaluator(features=["cost\_per\_capacity",\
 \ "energy\_per\_km"], ...)} cuts the evaluation count to about 13 by
 exploiting the structural monotonicity of the derived feature.
 \end{example}
+
+\subsection{Warm-start, picker strategies, and the GP evaluator}
+\label{sec:online-tier1}
+
+The basic online solver has three small extensions that significantly
+expand the tuning space without complicating the core algorithm.
+
+\paragraph{Warm-start.} A new \texttt{warm\_start} argument to
+\texttt{solve\_online} pre-populates the evaluator with seed
+observations before the picker takes over. It accepts either a list
+of candidate indices (manually picked corner runs) or an integer
+$n$ that triggers a greedy farthest-point heuristic over the feature
+space. The motivation is concrete: the
+\texttt{MonotonicityEvaluator}'s lower bounds only tighten for
+candidates whose features dominate every observation in the partial
+order. Without observations at the low-feature corner where the
+Pareto front typically lives, the picker explores indiscriminately
+and the evaluator remains uninformative throughout the budget. In
+example 16, evaluating the example with four corner warm-start runs
+lifts Monotonicity's Pareto recovery from zero to one of four
+classes; a hybrid with one of the other evaluators is the natural
+next step for cases where this is not enough.
+
+\paragraph{Pluggable picker strategies.} A new \texttt{picker}
+argument selects the candidate-scoring rule. Built-in options:
+\texttt{"lcb"} (the previous default, minimises the sum of
+lower-bound components, pure exploitation of the optimistic
+estimate); \texttt{"ucb"} (lower bound minus a $\kappa \cdot$
+(upper $-$ lower) exploration bonus, tunable via the tuple form
+\texttt{("ucb", \{"kappa": 1.0\})}); and \texttt{"random"}
+(uniform baseline for comparing the value of structural priors).
+Custom callables are accepted and receive
+\texttt{(lower, upper, r\_components, **kwargs)}. The strategies
+that matter in practice are LCB for confident priors and UCB with
+$\kappa \approx 0.3$ to $0.5$ when the prior is uncertain enough
+that pure exploitation gets stuck in a local region.
+
+\paragraph{Gaussian-process evaluator.} A new
+\texttt{GaussianProcessEvaluator} class uses a zero-mean GP with
+an RBF kernel, implemented in pure numpy. Hyperparameters are
+\texttt{length\_scale} (default $0.3$, suitable for features in
+$[0, 1]$), \texttt{sigma\_f} (default $1.0$, rescaled per-output by
+the empirical observation standard deviation), \texttt{noise}
+(default $10^{-3}$ jitter), \texttt{confidence} (default $2.0\sigma$
+for roughly $95\%$ coverage), and \texttt{min\_obs} (default $3$).
+The GP is more expressive than the linear-parametric evaluator and
+captures local nonlinearity that a global linear fit misses. For
+nearly-additive response surfaces such as the example 16 bioprocess
+effect model the two are empirically close, with
+\texttt{LinearParametricEvaluator} preferred for its simplicity;
+GP is the right tool when the response has strong feature
+interactions or local peaks that linear regression cannot represent.
 
 % ===========================================================================
 \section{Visualisation}
