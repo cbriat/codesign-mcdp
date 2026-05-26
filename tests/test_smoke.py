@@ -633,6 +633,98 @@ def test_online_solver():
           f"linpar {res_par.n_evaluated}ev")
 
 
+def test_diagram_smoke():
+    """Mechanical check that the block-diagram renderer produces a
+    well-formed Digraph for both a simple feedback System and a
+    System with lambda-based outer-R constraints.
+
+    Skips silently if the optional graphviz Python package is not
+    installed; the rest of the suite remains usable.
+    """
+    print("\n=== Diagram renderer ===")
+    try:
+        import graphviz  # noqa: F401
+    except ImportError:
+        print("  graphviz package not installed; skipped")
+        return
+
+    from codesign.diagram import (
+        draw_system, _extract_spec, _find_cycle_modules,
+        _collect_port_refs,
+    )
+
+    # Build a 2-module feedback System: an actuator/battery loop where
+    # battery.mass affects actuator demand and actuator.power affects
+    # battery capacity. This is the smallest case that exercises cycle
+    # detection.
+    sys_obj = System("loop_smoke")
+    end = sys_obj.provides("endurance", unit="s")
+    tot = sys_obj.requires("total_mass", unit="kg")
+
+    actuator = sys_obj.add("actuator", AlgebraicDP(
+        F=Ports({"lift_force": Reals(unit="N")}),
+        R=Ports({"power": Reals(unit="W"),
+                 "mass":  Reals(unit="kg")}),
+        equations={
+            "power": lambda f: f["lift_force"] * 4.0,
+            "mass":  lambda f: f["lift_force"] * 0.02,
+        },
+    ))
+    battery = sys_obj.add("battery", AlgebraicDP(
+        F=Ports({"capacity": Reals(unit="Wh")}),
+        R=Ports({"mass": Reals(unit="kg")}),
+        equations={"mass": lambda f: f["capacity"] * 0.005},
+    ))
+
+    actuator.lift_force >= 10.0 + battery.mass
+    battery.capacity    >= end * actuator.power / 3600.0
+    tot                 >= actuator.mass + battery.mass
+
+    # Sanity-check the extracted spec and cycle detection BEFORE the
+    # actual render.
+    spec = _extract_spec(sys_obj)
+    assert set(spec.modules) == {"actuator", "battery"}
+    assert set(spec.outer_F) == {"endurance"}
+    assert set(spec.outer_R) == {"total_mass"}
+    cyc = _find_cycle_modules(spec)
+    assert cyc == {"actuator", "battery"}, \
+        f"expected actuator/battery cycle, got {cyc}"
+
+    # Render. The Digraph should be non-empty and reference both
+    # module names plus the outer F/R.
+    dot = sys_obj.draw_diagram()
+    src = dot.source
+    assert "actuator" in src and "battery" in src
+    assert "outer_f__endurance" in src
+    assert "outer_r__total_mass" in src
+    # Cycle highlight: the cycle colour string should appear in the
+    # rendered source.
+    assert "#B45309" in src, "cycle edges should be coloured"
+
+    # Now exercise the lambda-based path. A constraint with a callable
+    # (no expr) should produce a "lambda_marker" node and a dashed
+    # edge.
+    sys2 = System("lam_smoke")
+    sys2.provides("input_x", unit="")
+    sys2.requires("output_y", unit="")
+    sys2.constrain("output_y", lambda x: 1.0)  # callable, no expr
+    dot2 = sys2.draw_diagram()
+    src2 = dot2.source
+    assert "lambda_marker" in src2, \
+        "lambda-based constraint should add a marker node"
+    assert "dashed" in src2
+
+    # Port-reference walker basic check.
+    feat_port = actuator.power
+    refs = _collect_port_refs(feat_port * 2.0)
+    assert any(r.module == "actuator" and r.name == "power" for r in refs)
+
+    print(f"  feedback diagram: {len(dot.body)} body lines, "
+          f"cycle modules = {sorted(cyc)}")
+    print(f"  lambda diagram: marker present, "
+          f"{len(dot2.body)} body lines")
+
+
 if __name__ == "__main__":
     test_posets()
     test_antichain()
@@ -650,4 +742,5 @@ if __name__ == "__main__":
     test_warm_start()
     test_viz_smoke()
     test_online_solver()
+    test_diagram_smoke()
     print("\nAll smoke tests passed.")

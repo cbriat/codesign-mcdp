@@ -415,3 +415,22 @@ class System:
                 else:
                     lines.append(f"    {target} >= <lambda>")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------ #
+    # Block-diagram rendering (Level-1 visual)
+    # ------------------------------------------------------------------ #
+    def draw_diagram(self, **kwargs):
+        """Render this system as a GraphViz block diagram.
+
+        Returns a :class:`graphviz.Digraph` object. See
+        :func:`codesign.diagram.draw_system` for the full list of
+        keyword arguments (``rankdir``, ``show_ports``,
+        ``highlight_cycles``, ``graph_attrs``, ``name``). Display
+        inline in a Jupyter notebook, or save to disk with
+        ``.render(filename, format="svg")``.
+
+        Raises ImportError if the ``graphviz`` package is not
+        installed.
+        """
+        from .diagram import draw_system
+        return draw_system(self, **kwargs)

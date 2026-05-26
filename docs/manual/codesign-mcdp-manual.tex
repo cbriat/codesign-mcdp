@@ -1410,6 +1410,87 @@ All four accept an optional \texttt{ax=...} argument so they compose
 into larger figures. The module is imported as
 \texttt{from codesign import viz}.
 
+\subsection{Block diagrams of Systems}
+\label{sec:block-diagrams}
+
+The \texttt{to\_dot} function above emits a plain string with
+module-level wiring. For richer visualisation, the library ships a
+dedicated diagram renderer in \texttt{codesign.diagram} that produces
+Simulink-style block diagrams:
+
+\begin{description}
+\item[One box per subsystem] with the F (functionality) ports listed
+  on the left and the R (resource) ports on the right. Each port is
+  individually addressable, so edges attach to specific ports rather
+  than to the module as a whole.
+\item[Outer F and outer R as separate nodes] on the diagram's left
+  and right margins. The system inputs and outputs are visible, not
+  buried inside the constraint list.
+\item[Port-level edges] whenever the constraint was written in the
+  operator-overloaded form
+  (\texttt{module1.r\_port >= module2.r\_port * ...}). Constraints
+  defined by callables that cannot be introspected are rendered with
+  a dashed edge from a small ``$\lambda$'' marker, so they remain
+  visible.
+\item[Cycle detection] via Tarjan's strongly-connected-components
+  algorithm on the module-level constraint graph. Edges within any
+  cycle of size $\geq 2$ are coloured amber, making the
+  Kleene-iteration loop visible at a glance.
+\end{description}
+
+The renderer returns a \texttt{graphviz.Digraph} object, which can be
+displayed inline in a Jupyter notebook or written to SVG / PDF / PNG
+via \texttt{dot.render(filename, format="svg")}:
+
+\begin{lstlisting}
+from codesign import draw_system
+
+dot = system.draw_diagram()        # convenience method on System
+# or equivalently:
+dot = draw_system(system, rankdir="LR", highlight_cycles=True)
+
+dot.render("bioprocess", format="svg", cleanup=True)
+\end{lstlisting}
+
+Optional dependency: install via
+\texttt{pip install codesign-mcdp[diagram]} (which pulls the
+\texttt{graphviz} Python package), and ensure the \texttt{dot}
+binary is on \texttt{PATH} (\texttt{apt-get install graphviz} on
+Debian / Ubuntu, \texttt{brew install graphviz} on macOS).
+
+\begin{example}[Bioprocess block diagram]
+The worked example~15 (\texttt{make\_bioprocess}) builds a four-
+module System with a single outer F (target titer) and three outer
+R aggregations defined by callables. The diagram renderer surfaces
+this structure compactly:
+\begin{lstlisting}
+from codesign import draw_system
+dp = make_bioprocess(cell_line=CHO_K1, glucose_setpoint_mm=8.0,
+                     annual_demand_kg=100.0)
+draw_system(dp, name="bioprocess").render("bioprocess",
+                                          format="svg",
+                                          cleanup=True)
+\end{lstlisting}
+The resulting diagram shows the four subsystems
+(\texttt{cell}, \texttt{feed}, \texttt{bior}, \texttt{media}),
+the outer functionality \texttt{target\_titer} feeding
+\texttt{cell.target\_titer}, the metabolic-load chain
+\texttt{cell.peak\_vcd}, \texttt{feed.metabolic\_factor}
+$\to$ \texttt{bior.peak\_vcd} and \texttt{media.peak\_vcd}, and a
+dashed $\lambda$ marker feeding the three outer R aggregations.
+\end{example}
+
+\begin{example}[Cyclic drone modular system]
+Example~7's modular drone has a battery--actuator feedback
+loop: the battery's mass adds to the actuator's lift demand, and the
+actuator's electrical power sets the battery's required capacity.
+\texttt{draw\_system} detects the cycle automatically and colours
+the two edges between \texttt{battery} and \texttt{actuator} in
+amber, while the supporting edges (from outer F endurance and
+extra\_power into the cycle, and from each module's mass to the
+outer R total\_mass) remain in muted grey.
+\end{example}
+
 \begin{example}[Pareto front of a vehicle co-design]
 The vehicle from worked example~8 has two Pareto-incomparable
 designs at the Small-parcel mission. A single call paints them on a

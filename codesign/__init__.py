@@ -59,6 +59,8 @@ from .online import (
     solve_online,
 )
 from . import viz
+from . import diagram
+from .diagram import draw_system
 
 __all__ = [
     "Reals", "Naturals", "Discrete", "Ports", "NamedProduct", "Poset",
@@ -76,4 +78,5 @@ __all__ = [
     "OptimisticEvaluator", "MonotonicityEvaluator", "LipschitzEvaluator",
     "LinearParametricEvaluator", "GaussianProcessEvaluator",
     "OnlineResult", "solve_online",
+    "draw_system",
 ]

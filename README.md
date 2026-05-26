@@ -418,6 +418,21 @@ dot = viz.to_dot(dp, name="my_dp")                         # System structure as
 
 Each helper accepts an existing matplotlib axes (`ax=...`) for composition into larger figures. `to_dot` returns a string suitable for piping into `dot -Tpng` or pasting into [graphviz online](https://dreampuf.github.io/GraphvizOnline/).
 
+### Block diagrams of Systems
+
+For richer Simulink-style block diagrams of `System`-built designs, `codesign.diagram` produces port-level wiring with cycle detection:
+
+```python
+from codesign import draw_system          # also: system.draw_diagram()
+
+dot = system.draw_diagram(rankdir="LR")    # returns a graphviz.Digraph
+dot.render("bioprocess", format="svg", cleanup=True)
+```
+
+Each subsystem becomes a box with its F ports on the left and R ports on the right; outer functionalities and outer resources appear as ellipses on the diagram's margins; constraint wiring resolves to specific ports rather than to whole modules. Strongly-connected components are detected automatically and their internal edges are coloured amber, so the Kleene-iteration cycle (where one exists) is visible at a glance. Lambda-based constraints get a dashed edge from a small `λ` marker.
+
+Optional dependency: `pip install codesign-mcdp[diagram]` plus the `dot` binary on PATH (`apt-get install graphviz` or `brew install graphviz`).
+
 ## How the solver works
 
 `solve` dispatches on the top-level operator. For non-loop DPs the answer is

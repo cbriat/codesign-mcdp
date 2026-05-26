@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Block-diagram rendering** (`codesign/diagram.py`,
+  `System.draw_diagram()`). A new visualisation that turns any
+  System into a Simulink-style block diagram via GraphViz: one box
+  per subsystem with F ports listed on the left and R ports on the
+  right, outer functionalities as teal ellipses on the diagram's
+  left margin, outer resources as navy ellipses on the right.
+  Constraint wiring is rendered port-to-port whenever the constraint
+  was written in the operator-overloaded form
+  (`m1.r_port >= m2.r_port * ...`). Lambda-based constraints get a
+  dashed edge from a small "λ" marker so they remain visible.
+  Strongly-connected components of size > 1 are detected via
+  Tarjan's algorithm and their internal edges are coloured amber
+  (`#B45309`), so the Kleene-iteration cycle is visible at a glance.
+  Returns a `graphviz.Digraph` that is Jupyter-displayable inline or
+  exportable via `.render(filename, format="svg")` to SVG, PDF, or
+  PNG.
+
+  Requires the optional `graphviz` Python package (added under a
+  new `diagram` extras group in `pyproject.toml`) plus the `dot`
+  binary on PATH. The rest of the package remains importable
+  without these dependencies; the diagram module is loaded lazily.
+
+  Sample output: example 7 (drone modular) shows the
+  battery ↔ actuator feedback cycle in amber, example 9 (robotic
+  arm) shows a five-module star with no cycle, example 15
+  (bioprocess) shows three lambda-aggregated outer R nodes via the
+  λ marker.
+
 - **Tier 1 online-solver enhancements** (`codesign/online.py`,
   `tests/test_online_tier1.py`):
   - **Warm-start mechanism**: `solve_online` now accepts a
