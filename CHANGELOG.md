@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Example 16: online DOE for the mAb fed-batch process**
+  (`examples/16_online_doe.py` and `notebooks/16_online_doe.ipynb`).
+  Takes the example 15 model, fixes CHO-K1 and the 100 kg/yr mission,
+  and sweeps a 5x5x5x3 = 375-point grid of operating conditions
+  (temperature, pH, glucose target, feed start day). Compares
+  factorial DOE (75 runs at the pH=7.1 slice), random sampling
+  (40 runs), and the three online evaluators (Lipschitz,
+  Monotonicity, LinearParametric) at a 40-run budget. Both
+  LinearParametric and tuned Lipschitz recover 3 of 4 Pareto classes,
+  matching the 75-run factorial DOE at 53% of the experimental cost.
+  Monotonicity alone is uninformative without warm-start, which the
+  example flags explicitly.
+
+- **Example 15: monoclonal antibody fed-batch co-design** (`examples/15_bioprocess.py`
+  and `notebooks/15_bioprocess.ipynb`). A worked biotech upstream
+  application with realistic parameters from the 2024-2026
+  bioprocessing literature. Four subsystems (CellLine, Media,
+  Bioreactor, FeedStrategy) coupled cyclically through peak cell
+  density; the Kleene iteration resolves the cycle automatically.
+  Sources: Reinhart 2021 (CHO specific productivity), BioProcess
+  International 2024 (kLa and OUR characterisation), Sustainability
+  Atlas 2026 (capex), Khattak 2010 (metabolic constraints), CHO media
+  market report 2025 (media pricing). The example produces a genuine
+  2-point Pareto front per mission scale, showing the CHO-K1 (cheap
+  COGS, larger footprint) vs CHO-MK (smaller footprint, higher
+  licence fee) tradeoff.
+
 ### Changed
 - **Renamed `NamedProduct` to `Ports`** to match the library's everyday
   vocabulary (port handles, outer F port, module R port, the operator

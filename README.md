@@ -222,6 +222,8 @@ payload), the iteration drives the loop variable to ⊤ and the result reports
 * `12_stochastic_drone.py` – Monte Carlo with a Gaussian copula, returning worst-case + mean + p95 + CVaR95 from a single solve call.
 * `13_microgrid.py` – flagship case study: solar + battery + diesel + frame with cyclic coupling, warm-started parameter sweep, stochastic sun hours, and the full visualisation suite.
 * `14_online_fleet.py` – online elimination-based co-design over a 200-candidate robot catalog using three flavours of optimistic evaluator.
+* `15_bioprocess.py` – monoclonal antibody fed-batch co-design with realistic CHO cell-line, media, bioreactor, and feed-strategy catalogues sourced from the 2024-2026 bioprocessing literature. Produces a 3-way (COGS, footprint, CO2 per gram) Pareto front across three mission scales (clinical 10 kg/yr, commercial 100 kg/yr, large 500 kg/yr).
+* `16_online_doe.py` – online Design of Experiments for the example 15 mAb process. Fixes CHO-K1 and the 100 kg/yr mission, then sweeps a 5x5x5x3 = 375-point grid of operating conditions (temperature, pH, glucose target, feed start day). Compares factorial DOE, random sampling, and the three online evaluators at a 40-run budget. LinearParametric and Lipschitz match a 75-run factorial DOE quality at 53% of the experimental cost.
 
 Run any of them with `python -m examples.NN_name`. The visualization example
 also needs matplotlib (`pip install matplotlib`).

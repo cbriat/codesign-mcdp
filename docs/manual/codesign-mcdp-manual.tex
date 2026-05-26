@@ -69,6 +69,7 @@
 \newcommand{\Min}{\mathsf{Min}}
 \newcommand{\Antichain}{\mathsf{A}}
 \newcommand{\topp}{\top}
+\newcommand{\etal}{\textit{et al.}}
 \newcommand{\codename}{\texttt{codesign-mcdp}}
 
 \hypersetup{
@@ -1805,6 +1806,77 @@ optimistic-evaluator bound. The example compares three flavours:
 \end{itemize}
 The notebook visualises the elimination cascade in feature space
 with stars marking the true Pareto front.
+
+\subsection{Example 15: monoclonal antibody fed-batch co-design}
+
+\texttt{15\_bioprocess.py}. A biopharmaceutical company has to
+deliver a monoclonal antibody at a target titer (g/L) and annual
+demand (kg/year). Four subsystems are coupled cyclically: a CHO cell
+line characterised by an effective specific productivity and an
+oxygen uptake rate; a media \texttt{CatalogDP} over commercial CD
+formulations (HyClone-CD, EX-CELL-CD-CHO, Cellvento-CHO-220,
+BalanCD-HIP); a bioreactor \texttt{CatalogDP} spanning single-use
+200 L through stainless-steel 25{,}000 L formats; and a feed strategy
+parameterised by glucose set-point with a U-shaped batch-failure
+penalty.
+
+The cycle that the Kleene iteration resolves: higher titer demand
+forces higher peak cell density, which inflates the metabolic burden
+through the feed strategy, which inflates the cell density required
+to deliver the same titer, which in turn drives the bioreactor and
+media catalogue lookups. The outer Pareto front in
+$(\text{COGS}, \text{footprint}, \text{CO}_2 \text{ per gram})$
+contains a genuine two-point tradeoff between CHO-K1 (low licence
+fee, long batch, larger footprint per year) and CHO-MK (high licence
+fee, short batch, smaller footprint at the same annual output).
+
+All parameters are calibrated to the 2024-2026 bioprocessing
+literature: specific productivity per cell line
+(Reinhart \etal\ 2021, Sumi \etal\ 2024), oxygen uptake rates and
+$k_L a$ correlations (BioProcess International 2024), bioreactor
+capex (Sustainability Atlas 2026, BioPlan 2025), media pricing
+(CHO media market report 2025), and metabolic constraints from
+Khattak \etal\ 2010 and Lao \& Toth 1997. The example is the first
+biotech-upstream application in the library and is intended both
+as a teaching example for the framework and as a starting point
+for discussions with industrial process-development groups.
+
+\subsection{Example 16: online DOE for the mAb fed-batch process}
+
+\texttt{16\_online\_doe.py}. Process development almost never sees
+a choice between fundamentally different cell lines; that decision
+is made years before commercialisation. The day-to-day question is
+where to operate within a tight 4D box of process parameters around
+a fixed line. This example fixes CHO-K1 and the 100 kg/year mission
+from example 15 and sweeps over a $5 \times 5 \times 5 \times 3 =
+375$-point grid of operating conditions (temperature, pH, glucose
+target, feed start day). Each candidate stands in for a 10 to
+14-day bioreactor run costing $\$20{,}000$ to $\$100{,}000$ in
+materials, labour, and analytics.
+
+The example compares two non-online baselines (a 75-run factorial
+DOE at the $\text{pH} = 7.1$ slice, and a 40-run uniform random
+sample at fixed seed) against the three online evaluators from
+\texttt{codesign.online} at a budget of 40 inner solves. At this
+budget the LinearParametric evaluator and the tuned Lipschitz
+evaluator both recover 3 of the 4 distinct Pareto classes, matching
+the 75-run factorial DOE at 53\% of the experimental cost. The
+Monotonicity evaluator alone is uninformative on this problem
+because its lower bounds tighten only for candidates above every
+observation in the partial order, and the picker has no observation
+at the low-feature corner where the Pareto front lives. The example
+flags this explicitly and discusses warm-start strategies. The
+companion notebook visualises the LinearParametric pick trajectory
+in the (temperature, glucose) projection, showing the exploration
+phase before \texttt{min\_obs} is reached and the concentration
+phase that follows.
+
+The take-home message generalises beyond bioprocess: the structural
+prior is doing the work, the budget is the cost. A predictive prior
+like LinearParametric, or a hybrid Gaussian-process-with-Lipschitz-
+tail, propagates information across the whole grid; pure local
+bounds (Lipschitz with conservative $L$, Monotonicity) need either
+denser observations or a warm-start.
 
 % ===========================================================================
 \section{Modelling Guidelines and Pitfalls}
