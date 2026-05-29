@@ -2024,6 +2024,84 @@ tail, propagates information across the whole grid; pure local
 bounds (Lipschitz with conservative $L$, Monotonicity) need either
 denser observations or a warm-start.
 
+\subsection{Example 17: full-vehicle co-design across ICE, hybrid, and EV}
+
+\texttt{17\_car\_codesign.py}. The largest example in the package
+and the first to model a system with three architecturally distinct
+variants in a single design study. A passenger car is decomposed
+into 18 to 24 MCDP modules per architecture (24 for ICE, 23 for
+hybrid, 18 for EV), each with its own F (functionality demands) and
+R (resource outputs). The three architectures are:
+
+\begin{itemize}
+\item \textbf{ICE.} Engine block (catalog), forced induction
+  (catalog), fuel injection, exhaust aftertreatment, cooling
+  (parametric, sized to engine heat rejection), lubrication,
+  multi-speed transmission (catalog), driveshaft / differential,
+  fuel tank, alternator, 12V battery, starter motor.
+\item \textbf{Hybrid.} Atkinson-cycle engine (catalog), motor /
+  generator, small HV battery (1 to 5 kWh, NiMH or Li-NMC),
+  planetary power-split, power electronics (IGBT or SiC), plus the
+  ICE accessories at reduced sizing. No alternator (DC-DC from HV),
+  no separate starter (integrated starter-generator).
+\item \textbf{EV.} Traction motor (catalog, PMSM or induction),
+  large HV battery (40 to 100 kWh, LFP or NMC, 400V or 800V), power
+  electronics, on-board AC charger plus DC fast-charge interface,
+  single-speed reducer, battery thermal management (heat-pump or
+  resistive).
+\end{itemize}
+
+All three share a common chassis core (body frame, front and rear
+suspension, front and rear brakes, steering, tires, wheels) and a
+common auxiliary core (HVAC, interior trim, safety systems, lighting
+and infotainment).
+
+Two coupled cycles close inside the constraint graph and are
+resolved by the Kleene iteration. The first is the mass spiral:
+every load-bearing subsystem reads the design mass as an F input,
+and the macro aggregation sums every module's weight back into the
+total. Heavier vehicle leads to heavier components leads to heavier
+vehicle; the fixed point is the smallest mass at which adding one
+kilogram of payload requires less than one kilogram of additional
+subsystem mass to support it. The second is the energy-storage loop:
+fuel-tank size (ICE / hybrid) or battery capacity (EV / hybrid)
+depends on consumption $\times$ range, and the storage's own mass
+contributes to curb weight. For EVs this cycle is dominant because
+the pack is 20 to 35\% of curb weight, so convergence takes 30 to
+50 iterations versus 15 to 25 for ICE.
+
+The example provides four representative missions (Urban Compact,
+Family Daily, Suburban Utility, Performance) and sweeps every
+architecture across all four. For the Family Daily mission
+(5 passengers, 700 km range, 9 s 0-100): the cheapest ICE is
+\$35{,}523 with 196 g/km CO$_2$; the cheapest HEV is \$40{,}272
+with 91 g/km CO$_2$ and the best 10-year TCO at \$56{,}427; the
+cheapest EV is \$65{,}290 with 58 g/km CO$_2$ but requires a
+100 kWh 800V pack and ends up at 2453 kg curb weight. A
+7-passenger 800 km EV remains infeasible against the modelled
+2024 pack-level energy density (160 to 180 Wh/kg), matching the
+real-world absence of such a product.
+
+Calibration values cite \emph{Genta (2014)} for chassis, the
+\emph{Bosch Automotive Handbook} for engines, \emph{Heywood (2018)}
+and \emph{Pulkrabek (2003)} for ICE thermodynamics,
+\emph{Hofmann (2019)} for hybrid topologies, \emph{Naunheimer
+(2011)} for transmissions, \emph{Larminie and Lowry (2012)} for
+electric powertrain, the \emph{IEA Global EV Outlook 2024} for
+battery pricing, and the \emph{EPA Automotive Trends Report} for
+fleet averages. Numbers should be understood as ``within published
+ranges for production vehicles in the 2020 to 2024 generation,''
+not as production-precision OEM data; the framework's contribution
+is the compositional analysis, not the specific point values.
+
+The block diagrams \texttt{docs/diagrams/car\_ice.svg},
+\texttt{car\_hev.svg}, \texttt{car\_ev.svg} show the full module
+graphs. The mass-spiral cycle is rendered in amber by the
+\texttt{draw\_system} renderer (cf.~section on diagram rendering),
+which detects strongly-connected components in the constraint graph
+via Tarjan's algorithm; in all three architectures the cycle
+includes every load-bearing module plus the powertrain.
+
 % ===========================================================================
 \section{Modelling Guidelines and Pitfalls}
 \label{sec:guidelines}

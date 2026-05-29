@@ -2568,8 +2568,163 @@ For the bioprocess engineer, this translates to: identify the structural assumpt
 
 
 # ---------------------------------------------------------------------------
-# Build all notebooks
+# NB 17: full-vehicle co-design (ICE / hybrid / EV)
 # ---------------------------------------------------------------------------
+
+NB_17 = [
+    ("md", """# 17. Full-vehicle co-design across ICE, hybrid, and electric architectures
+
+This is the largest example in the package and the first to model a system with three architecturally distinct variants in a single design study. A passenger vehicle is decomposed into 18 to 24 subsystems (depending on architecture), each a separate MCDP module with its own F (functionality demands) and R (resource outputs). For each of four representative missions we sweep over hundreds of catalog combinations and ask: which architecture, and which configuration within that architecture, minimises the relevant cost vector?
+
+The example surfaces two coupled cycles that automotive engineers fight at every program: the *mass spiral* (subsystem weights sum to curb weight, which feeds back as the design mass that the suspension, brakes, tires, and powertrain must support), and the *energy-storage loop* (fuel-tank size for ICE or battery capacity for EV depends on consumption × range; the storage's own mass contributes to curb weight, which raises consumption). The Kleene iteration resolves both cycles simultaneously.
+
+This notebook imports the example module from `examples/17_car_codesign.py` and demonstrates the workflow: build one car of each architecture for a chosen mission, solve, compare; then sweep all three across all missions and read off the Pareto winners.
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+
+# The notebook executes with CWD = project root.
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'car_codesign', os.path.join(PROJECT_ROOT, 'examples', '17_car_codesign.py'))
+ex17 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ex17)
+
+from codesign import solve
+print(f"Module loaded; {sum(1 for m in dir(ex17) if not m.startswith('_'))} public symbols")
+print(f"  ICE engines      : {len(ex17.ICE_ENGINES)}")
+print(f"  Hybrid engines   : {len(ex17.HYBRID_ENGINES)}")
+print(f"  Transmissions    : {len(ex17.ICE_TRANSMISSIONS)}")
+print(f"  Body styles      : {len(ex17.BODY_STYLES)}")
+print(f"  Suspension types : {len(ex17.SUSPENSION_VARIANTS)}")
+print(f"  Tire compounds   : {len(ex17.TIRES)}")
+print(f"  EV motors        : {len(ex17.EV_MOTORS)}")
+print(f"  EV batteries     : {len(ex17.EV_BATTERIES)}")"""),
+    ("md", """## Picking a representative mission
+
+We use the *Family Daily* mission as the showcase: 5 passengers, 500 L of cargo, 180 km/h top speed, 700 km of range, 0.9 g of braking authority, 0-100 km/h in 9 seconds. Realistic European D-segment territory.
+"""),
+    ("code", """mission = ex17.MISSIONS["Family Daily"]
+for k, v in mission.items():
+    print(f"  {k:<24} = {v}")"""),
+    ("md", """## Build one car of each architecture
+
+Each build function returns a `System.build()` design problem ready for `solve()`. The wiring inside each builder expresses the mass spiral and the energy-storage loop as MCDP constraints; the Kleene iteration finds the fixed point.
+"""),
+    ("code", """# ICE: 2.0L turbo gas + 8AT + comfort suspension + premium AS tires
+ice_dp = ex17.build_ice_car(
+    mission=mission,
+    body=next(b for b in ex17.BODY_STYLES if b.style_name == "mid_sedan"),
+    engine=next(e for e in ex17.ICE_ENGINES if e.name == "2.0L turbo gas"),
+    forced_induction=ex17.ForcedInduction(kind="single_turbo"),
+    transmission=next(t for t in ex17.ICE_TRANSMISSIONS if t.name == "8AT torque-converter"),
+    suspension_type="comfort",
+    tire_choice=next(t for t in ex17.TIRES if t.name == "premium_AS"),
+    wheel_choice=next(w for w in ex17.WHEELS if w.name == "alloy_cast_17"),
+    steering_choice=next(s for s in ex17.STEERING_OPTIONS if s.name == "EPS"),
+    drivetrain_layout="fwd")
+
+# HEV: 2.5L Atkinson + 120 kW motor + Li-NMC HV pack + SiC inverter
+hev_dp = ex17.build_hybrid_car(
+    mission=mission,
+    body=next(b for b in ex17.BODY_STYLES if b.style_name == "mid_sedan"),
+    engine=ex17.HYBRID_ENGINES[1],
+    motor_peak_power_kW=120,
+    hv_battery_chemistry="lithium_NMC",
+    power_electronics_sic=True,
+    suspension_type="comfort",
+    tire_choice=next(t for t in ex17.TIRES if t.name == "premium_AS"),
+    wheel_choice=next(w for w in ex17.WHEELS if w.name == "alloy_cast_17"),
+    steering_choice=next(s for s in ex17.STEERING_OPTIONS if s.name == "EPS"),
+    drivetrain_layout="fwd")
+
+# EV: 180 kW PMSM + 100 kWh NMC 800V + SiC + heat pump
+# (The 85 kWh pack is insufficient for 700 km at this mass; the 800V
+# 100 kWh option dominates here.)
+ev_dp = ex17.build_ev_car(
+    mission=mission,
+    body=next(b for b in ex17.BODY_STYLES if b.style_name == "mid_sedan"),
+    motor=next(m for m in ex17.EV_MOTORS if "180kW" in m.name),
+    battery=next(b for b in ex17.EV_BATTERIES if "100kWh" in b.name),
+    power_electronics_sic=True,
+    suspension_type="comfort",
+    tire_choice=next(t for t in ex17.TIRES if t.name == "EV_XL"),
+    wheel_choice=next(w for w in ex17.WHEELS if w.name == "alloy_cast_17"),
+    steering_choice=next(s for s in ex17.STEERING_OPTIONS if s.name == "EPS"),
+    drivetrain_layout="rwd")
+
+print("All three System DPs built")"""),
+    ("md", """## Solve and compare
+
+Each `solve()` runs the Kleene iteration until the mass spiral converges. ICE typically takes 15 to 25 iterations, HEV 15 to 20, EV 30 to 50 (the battery dominates the mass cycle so convergence is slower).
+"""),
+    ("code", """for name, dp in (("ICE", ice_dp), ("HEV", hev_dp), ("EV", ev_dp)):
+    res = solve(dp, dict(mission), max_iter=250, verbose=0)
+    pt = list(res.antichain.points)[0] if res.feasible and res.antichain.points else None
+    if not pt:
+        print(f"{name:<3}: INFEASIBLE")
+        continue
+    cost = pt["production_cost"]
+    wt = pt["curb_weight"]
+    co2 = pt["co2_per_km"]
+    durab = pt["durability"]
+    fuel = pt.get("fuel_consumption", 0.0)
+    energy = pt.get("energy_consumption", 0.0)
+    if name == "EV":
+        consumption = f"{energy:.1f} kWh/100km"
+    else:
+        consumption = f"{fuel:.1f} L/100km"
+    print(f"{name:<3}: cost=${cost:>7,.0f}  weight={wt:>5.0f}kg  "
+          f"{consumption:>14}  CO2={co2:>3.0f}g/km  durab={durab/1000:.0f}k km")"""),
+    ("md", """## Block diagram
+
+The framework's `draw_system` tool renders the module graph. For the EV the diagram shows 18 modules connected by ~80 constraint edges. The amber edges are the mass-spiral cycle, in which every load-bearing module feeds the total weight back to its own design-mass input.
+"""),
+    ("code", """import shutil
+if shutil.which("dot"):
+    from codesign import draw_system
+    g = draw_system(ev_dp, name="car_ev_notebook", rankdir="LR")
+    g.format = "svg"
+    svg_bytes = g.pipe()
+    from IPython.display import SVG, display
+    display(SVG(svg_bytes))
+else:
+    print("graphviz not available; skipping diagram")"""),
+    ("md", """## Sweeping the catalog
+
+The `sweep_ice`, `sweep_hev`, `sweep_ev` helpers iterate over reasonable combinations of body, engine / motor, transmission / power electronics, suspension, and tires. Each combination is solved at the mission; infeasible designs are silently dropped. Below we evaluate Urban Compact across all three architectures and report the cheapest feasible design per architecture.
+"""),
+    ("code", """mission_urban = ex17.MISSIONS["Urban Compact"]
+for arch_name, sweep_fn in (("ICE", ex17.sweep_ice),
+                              ("HEV", ex17.sweep_hev),
+                              ("EV",  ex17.sweep_ev)):
+    results = sweep_fn(mission_urban)
+    if not results:
+        print(f"{arch_name:<3}: 0 feasible designs")
+        continue
+    label, pt = min(results, key=lambda r: r[1]["production_cost"])
+    cost = pt["production_cost"]; wt = pt["curb_weight"]; co2 = pt["co2_per_km"]
+    if arch_name == "EV":
+        consumption = f"{pt.get('energy_consumption', 0):.1f} kWh/100km"
+    else:
+        consumption = f"{pt.get('fuel_consumption', 0):.1f} L/100km"
+    print(f"{arch_name:<3}: {len(results):>4} feasible  cheapest: "
+          f"${cost:>7,.0f} {wt:.0f}kg {consumption:>13} CO2={co2:.0f}g/km")"""),
+    ("md", """## What the analysis surfaces
+
+Across the four missions, three patterns emerge from the sweep:
+
+1. **ICE always wins on upfront cost.** It does so by 15 to 30%, driven mainly by the absence of an HV battery and power electronics. The cheapest feasible ICE configuration sits around $30,000 for a compact and $40,000 for a 7-seat SUV.
+
+2. **HEV always wins on 10-year TCO.** The 30% fuel-consumption credit from regenerative braking and engine-off idling compounds across 150,000 km of driving and overcomes the $4,000 to $6,000 hardware premium.
+
+3. **EV wins on tank-to-wheel CO2 but is range-limited by the mass spiral.** A 7-passenger 800-km EV remains infeasible against today's pack-level energy density (~160 Wh/kg). This is a genuine engineering finding, not a calibration artefact: the analogous real-world product (a 7-seat EV with 800 km of range) does not exist in the 2024 market.
+
+The framework's contribution is making each of these conclusions inspectable. Every R port of every module is exposed in the antichain; every constraint is a single line of operator-overloaded Python; and the diagram makes the mass spiral visible.
+"""),
+]
 
 
 def main():
@@ -2590,6 +2745,7 @@ def main():
         ("14_online_fleet.ipynb", NB_14),
         ("15_bioprocess.ipynb", NB_15),
         ("16_online_doe.ipynb", NB_16),
+        ("17_car_codesign.ipynb", NB_17),
     ]
     for name, cells in plan:
         write(name, cells)

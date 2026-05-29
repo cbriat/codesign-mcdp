@@ -725,6 +725,100 @@ def test_diagram_smoke():
           f"{len(dot2.body)} body lines")
 
 
+def test_car_codesign_smoke():
+    """Smoke-test example 17: build one car of each architecture (ICE,
+    HEV, EV), solve, and check the headline metrics fall in realistic
+    ranges. The mass spiral and energy-storage loops must converge.
+    """
+    print("\n=== Car co-design (ICE / HEV / EV) ===")
+    import importlib.util, os
+    path = os.path.join(os.path.dirname(__file__), os.pardir,
+                        "examples", "17_car_codesign.py")
+    if not os.path.exists(path):
+        print("  example 17 file missing; skipped")
+        return
+    spec = importlib.util.spec_from_file_location("car_codesign", path)
+    ex17 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ex17)
+
+    mission = ex17.MISSIONS["Family Daily"]
+    sedan_body = next(b for b in ex17.BODY_STYLES
+                      if b.style_name == "mid_sedan")
+    eps = next(s for s in ex17.STEERING_OPTIONS if s.name == "EPS")
+    alloy17 = next(w for w in ex17.WHEELS if w.name == "alloy_cast_17")
+    prem_tire = next(t for t in ex17.TIRES if t.name == "premium_AS")
+    xl_tire = next(t for t in ex17.TIRES if t.name == "EV_XL")
+
+    # ICE
+    ice = ex17.build_ice_car(
+        mission=mission,
+        body=sedan_body,
+        engine=next(e for e in ex17.ICE_ENGINES if e.name == "2.0L turbo gas"),
+        forced_induction=ex17.ForcedInduction(kind="single_turbo"),
+        transmission=next(t for t in ex17.ICE_TRANSMISSIONS
+                          if t.name == "8AT torque-converter"),
+        suspension_type="comfort",
+        tire_choice=prem_tire, wheel_choice=alloy17, steering_choice=eps,
+        drivetrain_layout="fwd")
+    res = solve(ice, dict(mission), max_iter=200, verbose=0)
+    assert res.feasible, "ICE configuration should converge"
+    pt = list(res.antichain.points)[0]
+    assert 1500 < pt["curb_weight"] < 2200, \
+        f"ICE curb weight {pt['curb_weight']} outside expected band"
+    assert 5 < pt["fuel_consumption"] < 12, \
+        f"ICE fuel consumption {pt['fuel_consumption']} outside expected band"
+    assert 25000 < pt["production_cost"] < 70000, \
+        f"ICE cost {pt['production_cost']} outside expected band"
+    print(f"  ICE  ok: ${pt['production_cost']:,.0f}, "
+          f"{pt['curb_weight']:.0f} kg, "
+          f"{pt['fuel_consumption']:.1f} L/100km, "
+          f"{pt['co2_per_km']:.0f} g/km CO2")
+
+    # HEV
+    hev = ex17.build_hybrid_car(
+        mission=mission,
+        body=sedan_body,
+        engine=ex17.HYBRID_ENGINES[1],
+        motor_peak_power_kW=120,
+        hv_battery_chemistry="lithium_NMC",
+        power_electronics_sic=True,
+        suspension_type="comfort",
+        tire_choice=prem_tire, wheel_choice=alloy17, steering_choice=eps,
+        drivetrain_layout="fwd")
+    res = solve(hev, dict(mission), max_iter=200, verbose=0)
+    assert res.feasible, "HEV configuration should converge"
+    pt = list(res.antichain.points)[0]
+    assert 1500 < pt["curb_weight"] < 2200
+    assert 3 < pt["fuel_consumption"] < 7, \
+        f"HEV fuel consumption {pt['fuel_consumption']} outside expected band"
+    print(f"  HEV  ok: ${pt['production_cost']:,.0f}, "
+          f"{pt['curb_weight']:.0f} kg, "
+          f"{pt['fuel_consumption']:.1f} L/100km, "
+          f"{pt['co2_per_km']:.0f} g/km CO2")
+
+    # EV (need 100 kWh pack at this mission to fit the range)
+    ev = ex17.build_ev_car(
+        mission=mission,
+        body=sedan_body,
+        motor=next(m for m in ex17.EV_MOTORS if "180kW" in m.name),
+        battery=next(b for b in ex17.EV_BATTERIES if "100kWh" in b.name),
+        power_electronics_sic=True,
+        suspension_type="comfort",
+        tire_choice=xl_tire, wheel_choice=alloy17, steering_choice=eps,
+        drivetrain_layout="rwd")
+    res = solve(ev, dict(mission), max_iter=300, verbose=0)
+    assert res.feasible, "EV configuration should converge"
+    pt = list(res.antichain.points)[0]
+    assert 2000 < pt["curb_weight"] < 2800
+    assert 15 < pt["energy_consumption"] < 25, \
+        f"EV energy consumption {pt['energy_consumption']} outside expected band"
+    assert pt["fuel_consumption"] == 0.0
+    print(f"  EV   ok: ${pt['production_cost']:,.0f}, "
+          f"{pt['curb_weight']:.0f} kg, "
+          f"{pt['energy_consumption']:.1f} kWh/100km, "
+          f"{pt['co2_per_km']:.0f} g/km CO2")
+
+
 if __name__ == "__main__":
     test_posets()
     test_antichain()
@@ -743,4 +837,5 @@ if __name__ == "__main__":
     test_viz_smoke()
     test_online_solver()
     test_diagram_smoke()
+    test_car_codesign_smoke()
     print("\nAll smoke tests passed.")

@@ -8,6 +8,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Example 17: full-vehicle co-design across ICE, hybrid, and EV
+  architectures** (`examples/17_car_codesign.py`,
+  `notebooks/17_car_codesign.ipynb`,
+  `docs/diagrams/car_ice.{svg,png}`,
+  `docs/diagrams/car_hev.{svg,png}`,
+  `docs/diagrams/car_ev.{svg,png}`). A 3300-line example that
+  decomposes a passenger car into 18 to 24 MCDP modules per
+  architecture and solves three powertrain variants in parallel:
+  conventional ICE (engine block, forced induction, fuel injection,
+  exhaust aftertreatment, cooling, lubrication, multi-speed
+  transmission, mechanical differential, fuel tank, 12V electrical),
+  parallel power-split hybrid (Atkinson engine, motor-generator,
+  small HV battery, planetary power-split, power electronics, plus
+  the ICE accessories at reduced sizing), and battery-electric
+  (traction motor, large HV battery, power electronics, on-board
+  charger, single-speed reducer, battery thermal management). All
+  three share a common chassis core (body frame, front and rear
+  suspension, front and rear brakes, steering, tires, wheels) and
+  auxiliary core (HVAC, interior, safety, lighting and infotainment).
+
+  Two coupled cycles close inside the constraint graph and are
+  resolved by the Kleene iteration: the mass spiral, in which every
+  load-bearing subsystem reads the design mass as an F input, and
+  the energy-storage loop, in which fuel-tank or battery size
+  depends on consumption × range while the storage's own mass
+  contributes to curb weight. For EVs the battery cycle dominates
+  the mass spiral (the pack is 20 to 35% of curb weight) so
+  convergence takes 30 to 50 iterations vs 15 to 25 for ICE.
+
+  The example provides four representative missions (Urban Compact,
+  Family Daily, Suburban Utility, Performance) and sweeps every
+  architecture across all four, emitting a Pareto-by-mission table
+  plus a global 10-year TCO summary. Sample headline finding for
+  Family Daily (5 passengers, 700 km range, 9 s 0-100): ICE cheapest
+  at $35,523 but 196 g/km CO2; HEV best TCO at $56,427 with 91 g/km;
+  EV lowest CO2 at 58 g/km but $65,290 upfront and 2453 kg with a
+  100 kWh 800V pack. A 7-passenger 800 km EV remains infeasible
+  against the modelled 2024 pack-level energy density, matching the
+  real-world absence of such a product.
+
+  Calibration values cite Genta (chassis), Bosch handbook (engines),
+  Heywood and Pulkrabek (ICE thermodynamics), Hofmann (hybrid
+  topologies), Naunheimer (transmissions), Larminie and Lowry
+  (electric powertrain), IEA Global EV Outlook (battery pricing),
+  EPA (fleet averages). New `EV_XL` tire entry (800 kg load index,
+  240 km/h speed rating) extends the catalog for heavier EVs.
+  Smoke test in `tests/test_smoke.py::test_car_codesign_smoke`
+  builds and solves one car of each architecture and checks
+  headline metrics fall in literature ranges.
+
 - **Block-diagram rendering** (`codesign/diagram.py`,
   `System.draw_diagram()`). A new visualisation that turns any
   System into a Simulink-style block diagram via GraphViz: one box
