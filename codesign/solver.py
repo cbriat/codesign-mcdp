@@ -296,14 +296,30 @@ def kleene_loop(
                 out[k] = v
         return out
 
-    status = "max_iter"  # default; overridden if we break early
+    status = "max_iter"  # overwritten below once a termination test fires
     iterations = 0
     overall_t0 = time.perf_counter()
+    # Kleene fixed-point iteration on the monotone map  Phi(A) = the
+    # minimal feasible resources required once each candidate resource r
+    # in the current antichain A is fed back through the loop axis.
+    #
+    # One step expands every point r of A through the inner DP, keeps
+    # only the outputs that dominate r (filter_above, which enforces the
+    # feedback inequality r_out >= r_in on the loop axis), and merges the
+    # per-point results into a single minimal antichain (union_min). The
+    # sequence A_0 <= A_1 <= ... is monotone non-decreasing in the
+    # antichain lattice and converges to the least fixed point, which is
+    # the loop's solution. Four ways the loop can stop are tested each
+    # step: empty result (infeasible), reaching a fixed point (A_next ==
+    # A), every point pinned at the loop-axis top (infeasible), or any
+    # numeric component diverging past the cap.
     for it in range(max_iter):
         iterations += 1
         t0 = time.perf_counter()
         next_pieces: List[Antichain] = []
         for r in A:
+            # Build the inner functionality: the outer F values plus this
+            # candidate's value on the fed-back loop axis.
             f_inner = {}
             if f_outer is not None:
                 f_inner.update(f_outer)
@@ -311,11 +327,19 @@ def kleene_loop(
             try:
                 a_r = inner.h(f_inner)
             except (OverflowError, ValueError, ZeroDivisionError):
+                # A numeric blow-up in a module's h is treated as local
+                # infeasibility (top), not a crash, so the rest of the
+                # antichain still iterates.
                 a_r = Antichain.singleton(R_loop, R_loop.top())
+            # Cap runaway values to +inf so divergence is detectable and
+            # arithmetic stays finite.
             capped_points = [cap_point(p) for p in a_r.points]
             a_r = Antichain.from_set(R_loop, capped_points)
+            # Enforce the feedback inequality: keep only outputs that
+            # dominate the resource r that produced them.
             a_r_above = a_r.filter_above(r)
             next_pieces.append(a_r_above)
+        # Merge the per-point expansions into one minimal antichain.
         A_next = Antichain.union_min(R_loop, next_pieces)
         elapsed_ms = (time.perf_counter() - t0) * 1e3
 
@@ -334,17 +358,21 @@ def kleene_loop(
         if verbose >= 2:
             print(_verbose_iter_line(entry))
 
+        # Termination 1: an empty antichain means no feasible resource
+        # bundle exists; collapse to top to signal infeasibility.
         if A_next.is_empty():
             A = Antichain.singleton(R_loop, R_loop.top())
             status = "converged"
             break
 
+        # Termination 2: a true fixed point. This is the success case.
         if A_next.eq(A):
             A = A_next
             status = "converged"
             break
 
-        # If every point reached the loop axis top, the system is infeasible.
+        # Termination 3: every point pinned at the loop-axis top means
+        # the feedback demand can never be met (infeasible).
         all_axis_top = all(
             inner.R.components[axis].is_top(p[axis]) for p in A_next
         )
@@ -353,7 +381,8 @@ def kleene_loop(
             status = "converged"
             break
 
-        # Divergence guard: if any numeric component crosses the cap, flag it.
+        # Termination 4: a numeric component crossed the divergence cap,
+        # so the iteration is not going to settle; stop and flag it.
         if _has_any_diverged(A_next, DIVERGENCE_CAP):
             A = A_next
             status = "diverged"

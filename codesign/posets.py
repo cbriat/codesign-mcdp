@@ -232,7 +232,8 @@ class Ports(Poset):
     def __init__(self, components: Mapping[str, Poset]):
         if not components:
             raise ValueError("Ports requires at least one component")
-        # Copy into a fresh dict so the caller can't mutate us by side effect.
+        # Copy into a fresh dict so later caller-side mutation of the
+        # argument cannot corrupt this Ports instance.
         self.components: dict[str, Poset] = dict(components)
         # Display name like "capacity:R+[J] × endurance:R+[s]".
         self.name = "×".join(f"{k}:{p.name}" for k, p in self.components.items())

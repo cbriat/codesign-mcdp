@@ -1,6 +1,7 @@
 """Quick smoke test verifying posets, antichains, and basic DPs."""
+import os
 import sys
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     Reals, Naturals, Ports,
@@ -310,6 +311,12 @@ def test_solver_trace_and_status():
 def test_uncertainty_box():
     """Box uncertainty: worst case is at the declared-worst corner."""
     print("\n=== Uncertainty: Box (set-based) ===")
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        print("  numpy not installed; skipped "
+              "(install the 'online' or 'dev' extra)")
+        return
 
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
@@ -367,7 +374,12 @@ def test_uncertainty_box():
 def test_uncertainty_stochastic():
     """Stochastic uncertainty with a Gaussian copula: summaries are sane."""
     print("\n=== Uncertainty: Stochastic (MC) ===")
-    from scipy import stats
+    try:
+        from scipy import stats
+    except ImportError:
+        print("  scipy not installed; skipped "
+              "(install the 'online' or 'dev' extra)")
+        return
 
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
@@ -428,7 +440,12 @@ def test_warm_start():
     """Warm-start: solving with start_from=prev should accept the prior
     inner antichain and converge in fewer iterations on average."""
     print("\n=== Warm start across a parameter sweep ===")
-    import numpy as np
+    try:
+        import numpy as np
+    except ImportError:
+        print("  numpy not installed; skipped "
+              "(install the 'online' or 'dev' extra)")
+        return
 
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
@@ -569,6 +586,12 @@ def test_online_solver():
     candidates than the catalogue size when bounds bite.
     """
     print("\n=== Online elimination solver ===")
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        print("  numpy not installed; skipped "
+              "(install the 'online' or 'dev' extra)")
+        return
     import math, random
 
     F = Ports({"target_throughput": Reals(unit="pkg/h")})

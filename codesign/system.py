@@ -274,9 +274,12 @@ class System:
             mod_name: mod.R for mod_name, mod in modules.items()
         })
 
-        # If there are subsystems, the loop axis bundles their R ports.
-        # If there aren't any, the System is purely algebraic and we can
-        # short-circuit with a flat AlgebraicDP-style FunctionDP.
+        # When the System has subsystems, the internal loop's feedback
+        # axis is a bundle of every subsystem's R ports: the solver
+        # iterates an estimate of all module outputs until it reaches a
+        # fixed point. With no subsystems the System is purely algebraic
+        # (outer F straight to outer R), so the loop axis is skipped and
+        # the result is a flat FunctionDP.
         if modules:
             inner_F_components = dict(self._outer_F)
             inner_F_components[_MODULES_AXIS] = module_R_bundle
@@ -315,12 +318,17 @@ class System:
                 if value is None:
                     value = v
                 else:
-                    # join = max for chains; for richer posets, callers may
-                    # supply pre-joined demands. We default to max.
+                    # Multiple demands on one port are combined by their
+                    # join, which on a totally ordered (chain) poset such
+                    # as the reals is the maximum. Callers needing a join
+                    # on a richer poset should pre-combine the demands;
+                    # the max fallback below covers the common chain case.
                     try:
                         value = max(value, v)
                     except TypeError:
-                        value = v  # fall back to last; user takes responsibility
+                        # Non-orderable values: keep the most recent and
+                        # leave correctness to the caller.
+                        value = v
             return value
 
         # --- Inner h ----------------------------------------------------- #
@@ -348,9 +356,11 @@ class System:
                     a_M = Antichain.singleton(mod.R, mod.R.top())
                 module_antichains[mod_name] = a_M
 
-            # Cartesian product over subsystem antichains. Each combination
-            # is a candidate full module-R bundle; for each we compute the
-            # outer R values from the constraint expressions.
+            # Take the Cartesian product over the subsystems' antichains.
+            # Each combination picks one resource point from every
+            # subsystem, forming a candidate full module-R bundle; the
+            # outer R values are then evaluated from the constraint
+            # expressions against that bundle.
             candidate_points: List[Dict[str, Any]] = []
             module_names = list(modules.keys())
             antichain_lists = [list(module_antichains[m]) for m in module_names]

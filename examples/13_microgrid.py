@@ -29,6 +29,8 @@ trace, the MC distribution of total cost, and the system structure.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from scipy import stats
 
@@ -314,25 +316,32 @@ def main():
         print("(matplotlib not available; skipping plot generation)")
         return
 
+    out_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "outputs"))
+    os.makedirs(out_dir, exist_ok=True)
+
     r_trace = solve(dp, mission, max_iter=400, trace=True)
     ax = viz.plot_convergence(r_trace, title="Microgrid Kleene convergence (LFP)")
     plt.tight_layout()
-    plt.savefig("/tmp/microgrid_convergence.png", dpi=110)
+    conv_path = os.path.join(out_dir, "microgrid_convergence.png")
+    plt.savefig(conv_path, dpi=110)
     plt.close()
-    print("   saved /tmp/microgrid_convergence.png")
+    print(f"   saved {conv_path}")
 
     ax = viz.plot_uncertainty(res, "total_cost_usd",
                               nominal=nominal_cost,
                               title="MC distribution of total cost (LFP)")
     plt.tight_layout()
-    plt.savefig("/tmp/microgrid_uncertainty.png", dpi=110)
+    unc_path = os.path.join(out_dir, "microgrid_uncertainty.png")
+    plt.savefig(unc_path, dpi=110)
     plt.close()
-    print("   saved /tmp/microgrid_uncertainty.png")
+    print(f"   saved {unc_path}")
 
     dot = viz.to_dot(dp, name="microgrid")
-    with open("/tmp/microgrid.dot", "w") as fh:
+    dot_path = os.path.join(out_dir, "microgrid.dot")
+    with open(dot_path, "w") as fh:
         fh.write(dot)
-    print("   saved /tmp/microgrid.dot")
+    print(f"   saved {dot_path}")
 
 
 if __name__ == "__main__":

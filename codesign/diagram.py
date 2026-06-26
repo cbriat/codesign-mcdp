@@ -236,7 +236,7 @@ def draw_system(system, *, name: Optional[str] = None,
 
 # ---------------------------------------------------------------------------
 # Internal extraction: take a System or built-System DP and pull out
-# a uniform "spec" with the data we need to render.
+# a uniform "spec" carrying the data needed to render it.
 # ---------------------------------------------------------------------------
 
 

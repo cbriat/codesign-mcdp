@@ -1632,11 +1632,16 @@ class ElectricMotor(Module):
         battery_voltage_V    : sets motor winding voltage
 
     Outputs (R):
-        weight     : kg
-        cost       : USD
-        peak_efficiency : motor efficiency at the rated point
-        peak_torque_Nm  : Nm at the motor shaft
-        durability : km
+        weight              : kg
+        cost                : USD
+        peak_efficiency     : motor efficiency at the rated point
+        peak_torque_Nm      : Nm available at the motor shaft
+        rated_peak_power_kW : kW the motor can deliver at peak (echoes
+                              the catalog rating so downstream modules
+                              such as the reducer and power electronics
+                              can size to a resource port rather than to
+                              an F port)
+        durability          : km
     """
     F = {
         "target_peak_power_kW":  Reals(unit="kW"),
@@ -1644,11 +1649,12 @@ class ElectricMotor(Module):
         "battery_voltage_V":     Reals(unit="V"),
     }
     R = {
-        "weight":          Reals(unit="kg"),
-        "cost":            Reals(unit="USD"),
-        "peak_efficiency": Reals(unit=""),
-        "peak_torque_Nm":  Reals(unit="Nm"),
-        "durability":      Reals(unit="km"),
+        "weight":              Reals(unit="kg"),
+        "cost":                Reals(unit="USD"),
+        "peak_efficiency":     Reals(unit=""),
+        "peak_torque_Nm":      Reals(unit="Nm"),
+        "rated_peak_power_kW": Reals(unit="kW"),
+        "durability":          Reals(unit="km"),
     }
 
     def __init__(self, name: str, *,
@@ -1667,6 +1673,11 @@ class ElectricMotor(Module):
         self.name = name
 
     def h(self, f):
+        # The motor is a catalog entry: its weight, cost, and torque
+        # follow from the requested peak power and the fixed
+        # specific-power / torque-per-kW ratings. A request the motor
+        # cannot satisfy on torque returns an infeasible (infinite-cost)
+        # bundle so the solver eliminates it.
         p = f["target_peak_power_kW"]
         weight = p / self.specific_power_kW_per_kg + 5.0
         cost = self.base_cost_usd + self.cost_per_kW * p
@@ -1675,10 +1686,12 @@ class ElectricMotor(Module):
             return {"weight": float("inf"), "cost": float("inf"),
                     "peak_efficiency": self.peak_efficiency,
                     "peak_torque_Nm": torque,
+                    "rated_peak_power_kW": p,
                     "durability": 0.0}
         return {"weight": weight, "cost": cost,
                 "peak_efficiency": self.peak_efficiency,
                 "peak_torque_Nm": torque,
+                "rated_peak_power_kW": p,
                 "durability": self.durability_km}
 
 
@@ -2558,8 +2571,9 @@ def build_hybrid_car(*, mission: Dict[str, float],
     f_decel = sys.provides("target_decel_g",     unit="g")
     f_0_100 = sys.provides("target_0_100_s",     unit="s")
 
-    # ---- Outer R: same headline metrics; electric is 0 for HEV but we
-    # still expose it so HEV and EV results are directly comparable.
+    # ---- Outer R: same headline metrics as the ICE car. Electric
+    # consumption is zero for a (non-plug-in) hybrid but is still
+    # exposed so HEV and EV results line up on the same axes.
     sys.requires("production_cost",       unit="USD")
     sys.requires("curb_weight",           unit="kg")
     sys.requires("fuel_consumption",      unit="L/100km")
@@ -2819,8 +2833,9 @@ def build_ev_car(*, mission: Dict[str, float],
     f_decel = sys.provides("target_decel_g",     unit="g")
     f_0_100 = sys.provides("target_0_100_s",     unit="s")
 
-    # ---- Outer R: same shape; fuel_consumption is 0 for an EV but we
-    # report it so EV is directly comparable to ICE / HEV.
+    # ---- Outer R: same shape as the ICE / HEV cars. Fuel consumption
+    # is zero for an EV but is still reported so all three architectures
+    # are directly comparable on the same cost vector.
     sys.requires("production_cost",       unit="USD")
     sys.requires("curb_weight",           unit="kg")
     sys.requires("fuel_consumption",      unit="L/100km")
@@ -2902,24 +2917,23 @@ def build_ev_car(*, mission: Dict[str, float],
     sf_m.target_max_speed    >= f_speed
 
     # ---- Powertrain wiring --------------------------------------------
-    # Motor sized by required peak power (lambda below). Battery
-    # voltage feeds the motor; battery is sized to target range and
-    # energy consumption (cycle-closing).
-    mot_m.battery_voltage_V >= bat_m.voltage_V
-    pe_m.peak_motor_power_kW >= mot_m.rated_peak_power_kW_alias if False else None
-    # NOTE: ElectricMotor doesn't expose a rated_peak_power_kW R port
-    # yet; we wire the lambda directly via the constrain interface.
-    obc_m.battery_voltage_V >= bat_m.voltage_V
-    red_m.input_peak_power_kW >= mot_m.peak_torque_Nm  # placeholder
-    # Actually: reducer needs power and torque from motor (R ports).
-    # Motor exposes peak_torque_Nm as R but not peak power. Recast:
-    sys.constrain("reducer.input_peak_power_kW",
-                  lambda x: x["motor.peak_torque_Nm"] * 0.5)  # rough
-    sys.constrain("reducer.input_peak_torque_Nm",
-                  lambda x: x["motor.peak_torque_Nm"])
+    # ---- Powertrain wiring --------------------------------------------
+    # The motor's peak power and torque are set by the mission demand
+    # (lambda constraints below). The battery voltage feeds the motor
+    # and the on-board charger; the battery capacity is sized from the
+    # target range and energy consumption, which closes the energy
+    # cycle. The reducer and power electronics size to the motor's
+    # rated peak power (a resource port, so it is legal on the RHS of a
+    # demand constraint).
+    mot_m.battery_voltage_V    >= bat_m.voltage_V
+    obc_m.battery_voltage_V    >= bat_m.voltage_V
+    red_m.input_peak_power_kW  >= mot_m.rated_peak_power_kW
+    red_m.input_peak_torque_Nm >= mot_m.peak_torque_Nm
+    pe_m.peak_motor_power_kW   >= mot_m.rated_peak_power_kW
 
-    # Battery thermal management depends on battery energy capacity
-    # and motor peak power.
+    # Battery thermal management is sized by the battery energy capacity
+    # (thermal mass to hold in range) and the motor peak power (peak
+    # heat load during hard acceleration and fast charging).
     btm_m.battery_energy_kWh   >= bat_m.energy_kWh
     sys.constrain("thermal.peak_motor_power_kW",
                   lambda x: peak_power_demand_kW(x))
@@ -3149,7 +3163,7 @@ def sweep_hev(mission: Mapping[str, float], *, verbose: bool = False
     for body in bodies:
         for engine in HYBRID_ENGINES:
             for motor_kW in motor_options:
-                for chem in ("lithium_NMC",):  # NiMH skipped for brevity
+                for chem in ("lithium_NMC",):  # NiMH omitted: Li-NMC dominates modern strong hybrids
                     for tires in tires_ok:
                         for susp in ("economy", "comfort"):
                             try:

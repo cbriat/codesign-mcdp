@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "A Python library for Monotone Co-Design Problems (MCDPs) following Censi (2015)."
 readme = "README.md"
 license = { text = "MIT" }
+authors = [
+    { name = "Corentin Briat", email = "corentin@briat.info" },
+]
 requires-python = ">=3.9"
 keywords = ["co-design", "mcdp", "design-problem", "pareto", "fixed-point", "lattice"]
 classifiers = [
@@ -28,12 +31,22 @@ dependencies = []
 [project.optional-dependencies]
 viz = ["matplotlib>=3.5"]
 diagram = ["graphviz>=0.20"]
+online = ["numpy>=1.23", "scipy>=1.9"]
 nb = ["matplotlib>=3.5", "nbformat>=5", "nbconvert>=7", "ipykernel>=6", "jupyter"]
-dev = ["matplotlib>=3.5", "nbformat>=5", "nbconvert>=7", "ipykernel>=6"]
+dev = [
+    "pytest>=7",
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "matplotlib>=3.5",
+    "graphviz>=0.20",
+    "nbformat>=5",
+    "nbconvert>=7",
+    "ipykernel>=6",
+]
 
 [project.urls]
-Homepage = "https://github.com/your-username/codesign-mcdp"
-Repository = "https://github.com/your-username/codesign-mcdp"
+Homepage = "https://github.com/cbriat/codesign-mcdp"
+Repository = "https://github.com/cbriat/codesign-mcdp"
 "Paper (Censi 2015)" = "https://arxiv.org/abs/1512.08055"
 
 [tool.setuptools.packages.find]

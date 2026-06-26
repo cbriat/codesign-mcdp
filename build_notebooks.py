@@ -144,7 +144,7 @@ for label, f in cases:
     result = solve(drone, f, max_iter=200)
     print(f"{label:<16} iters={result.iterations:>3}  "
           f"feasible={result.feasible}  {result.antichain}")"""),
-    ("md", """## What we just saw
+    ("md", """## Reading the result
 
 For the feasible cases, the antichain converges to a single battery mass that grows roughly with mission energy. The marginal and infeasible cases hit the divergence cap: the actuator can't lift a battery large enough to satisfy its own energy demand, so the Kleene ascent walks the loop axis to `⊤` and the solver reports `feasible=False`.
 
@@ -195,7 +195,7 @@ The inner DP enumerates every splitting $(c_1, c_2)$ of the deficit into the two
             return Antichain.singleton(R, {"xy": top, "xy_report": top})
 
         # ceil(sqrt(x_in)) without floating point: integer-square-root.
-        # If isqrt(n)**2 < n then n was not a perfect square, so we add 1.
+        # If isqrt(n)**2 < n then n is not a perfect square; round up.
         sx = math.isqrt(int(x_in)) + (1 if math.isqrt(int(x_in)) ** 2 < int(x_in) else 0)
         sy = math.isqrt(int(y_in)) + (1 if math.isqrt(int(y_in)) ** 2 < int(y_in) else 0)
         # The constraint x + y >= ceil(sqrt(x)) + ceil(sqrt(y)) + c, with the
@@ -1095,7 +1095,7 @@ for label, f in cases:
         for p in result.antichain.points:
             print(f"   total_mass = {p['total_mass']:.2f} kg")
     print()"""),
-    ("md", """## What the DSL bought us
+    ("md", """## What the DSL provides
 
 The eight constraint lines above each express a single physical relationship. In the lambda-based form, the same model would have grown to roughly twenty-five lines of `lambda x: x["something.something"] + ...` boilerplate, with every port name as a string. The operator-overloaded version:
 
@@ -1977,7 +1977,7 @@ Each is a small Module or CatalogDP. The cell line maps a titer demand to a requ
     ("code", """def make_bioreactor_dp():
     # CatalogDP that picks the smallest bioreactor supporting the
     # demanded peak VCD. Costs are per-batch; the working volume is
-    # an output we use later to compute COGS per gram.
+    # an output used later to compute COGS per gram.
     F = Ports({"peak_vcd": Reals(unit="1e6 cells/mL")})
     R = Ports({
         "working_volume":  Reals(unit="L"),
@@ -2073,7 +2073,7 @@ The outer F is the target titer; the outer R is the cost vector (COGS, footprint
     media.peak_vcd    >= cell.peak_vcd * feed.metabolic_factor
 
     # Outer R aggregation. We use the dict-based constrain form because
-    # we need to combine several ports with closed-over parameters
+    # several ports must be combined with closed-over parameters
     # (annual_demand_kg, downstream_yield, turnaround_days).
     def cogs_eq(x):
         vol = x["bior.working_volume"]

@@ -35,6 +35,7 @@ runs through the catalogue.
 from __future__ import annotations
 
 import math
+import os
 import random
 from typing import Dict, List
 
@@ -239,11 +240,15 @@ def run():
         ax.grid(alpha=0.3)
     fig.suptitle("Online elimination across 200 robot candidates", fontsize=12)
     fig.tight_layout()
-    out_path = "/tmp/fleet_online.png"
+    out_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "outputs"))
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "fleet_online.png")
     fig.savefig(out_path, dpi=110)
     print(f"Saved figure to {out_path}")
 
-    # Convergence: how the incumbent shrinks as we evaluate
+    # Convergence: the incumbent antichain grows as more candidates are
+    # evaluated.
     fig2, ax2 = plt.subplots(figsize=(8, 4.5))
     for label, res in all_results:
         sizes = [h["evaluated"] for h in res.history]
@@ -251,12 +256,13 @@ def run():
         ax2.plot(sizes, antichain_sizes, marker=".", label=label)
     ax2.set_xlabel("inner solves performed")
     ax2.set_ylabel("incumbent antichain size")
-    ax2.set_title("Incumbent antichain grows as we evaluate")
+    ax2.set_title("Incumbent antichain grows with evaluations")
     ax2.grid(alpha=0.3)
     ax2.legend(fontsize=9)
     fig2.tight_layout()
-    fig2.savefig("/tmp/fleet_online_convergence.png", dpi=110)
-    print("Saved convergence figure to /tmp/fleet_online_convergence.png")
+    conv_path = os.path.join(out_dir, "fleet_online_convergence.png")
+    fig2.savefig(conv_path, dpi=110)
+    print(f"Saved convergence figure to {conv_path}")
 
 
 if __name__ == "__main__":

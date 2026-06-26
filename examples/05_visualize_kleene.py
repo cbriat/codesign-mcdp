@@ -5,7 +5,7 @@ shows one iterate S_k of the antichain in N x N. The seed is {(0, 0)}
 and the iteration converges in a handful of steps.
 
 Run:  python -m examples.05_visualize_kleene
-Produces a PNG in /mnt/user-data/outputs/.
+Produces PNG figures in an ``outputs/`` directory at the repository root.
 """
 from __future__ import annotations
 

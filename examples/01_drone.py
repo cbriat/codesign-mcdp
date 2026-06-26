@@ -20,8 +20,9 @@ Physics (simple lumped model):
 
 Closing the loop: required_mass <= trial_mass.
 """
+import os
 import sys
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     Reals, Ports, FunctionDP, loop, solve,

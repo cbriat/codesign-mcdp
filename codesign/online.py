@@ -716,7 +716,7 @@ def solve_online(
                 candidates, evaluator.features, warm_start)
         else:
             warm_ids = [int(i) for i in warm_start]
-        # Truncate so we don't blow the budget on warm-start alone.
+        # Truncate so the warm-start seeds cannot exceed the budget.
         warm_ids = warm_ids[:budget]
 
     R: Optional[Poset] = None
@@ -806,9 +806,9 @@ def solve_online(
             "phase": "picker",
         })
 
-    # The remaining (unevaluated, undominated) candidates ARE eliminated
-    # for the purposes of the antichain (we never spent budget on them);
-    # they are kept around as "unexplored" for the diagnostic.
+    # The remaining (unevaluated, undominated) candidates are eliminated
+    # for the purposes of the antichain (no budget was ever spent on them);
+    # they are retained as "unexplored" for the diagnostic.
     n_eval = len(evaluated_ids)
     n_elim = len(eliminated_ids)
 

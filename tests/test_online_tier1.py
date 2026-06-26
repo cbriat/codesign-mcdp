@@ -21,6 +21,18 @@ import sys
 # Make codesign importable when run from the repo root.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples"))
 
+# The online tier-1 tests reuse the example 16 model, which depends on
+# numpy. Skip the whole module cleanly when numpy is unavailable (for
+# example on a bare install without the 'online' or 'dev' extra).
+try:
+    import pytest
+    pytest.importorskip("numpy")
+except ImportError:  # pytest itself not installed (script-mode run)
+    import importlib.util as _ilu
+    if _ilu.find_spec("numpy") is None:
+        print("numpy not installed; skipping online tier-1 tests")
+        sys.exit(0)
+
 # Re-use the example 16 model and grid wholesale.
 import importlib.util
 spec = importlib.util.spec_from_file_location(

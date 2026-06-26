@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus a global 10-year TCO summary. Sample headline finding for
   Family Daily (5 passengers, 700 km range, 9 s 0-100): ICE cheapest
   at $35,523 but 196 g/km CO2; HEV best TCO at $56,427 with 91 g/km;
-  EV lowest CO2 at 58 g/km but $65,290 upfront and 2453 kg with a
+  EV lowest CO2 at 58 g/km but $64,666 upfront and 2434 kg with a
   100 kWh 800V pack. A 7-passenger 800 km EV remains infeasible
   against the modelled 2024 pack-level energy density, matching the
   real-world absence of such a product.

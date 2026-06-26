@@ -24,16 +24,34 @@ and converges in six iterations to the five-point Pareto front
 ## Installation
 
 The library has no required runtime dependencies beyond the Python standard
-library; only one visualization example uses matplotlib.
+library; only some examples and the optional layers use third-party packages
+(matplotlib for plots, graphviz for diagrams, numpy/scipy for the online and
+stochastic layers).
+
+Install the latest version directly from Git:
 
 ```bash
-git clone https://github.com/<your-username>/codesign-mcdp.git
-cd codesign-mcdp
-pip install -e .
+pip install git+https://github.com/cbriat/codesign-mcdp.git
 ```
 
-Or, equivalently, drop the `codesign/` directory on your `PYTHONPATH` and
-import directly. Python 3.9 or newer is required.
+Or clone and install in editable mode for development:
+
+```bash
+git clone https://github.com/cbriat/codesign-mcdp.git
+cd codesign-mcdp
+pip install -e ".[dev]"      # everything: tests, plots, diagrams, notebooks
+```
+
+The optional-dependency groups are `viz` (matplotlib), `diagram` (graphviz),
+`online` (numpy + scipy), `nb` (notebook tooling), and `dev` (all of the
+above plus pytest). A bare `pip install -e .` pulls nothing extra and still
+runs the full solver. Python 3.9 or newer is required.
+
+Run the test suite with:
+
+```bash
+pytest
+```
 
 ## A 30-second example
 
@@ -277,7 +295,7 @@ result.trace        # list of TraceEntry when trace=True, else None
 result.converged    # backward-compat alias for status == "converged"
 ```
 
-`status` and `feasible` are orthogonal. `status="converged"` with `feasible=False` is a clean infeasibility (the antichain settled at ⊤). `status="max_iter"` with `feasible=True` means we ran out of iterations but the run was still feasible-looking; usually a sign to increase `max_iter`. `status="diverged"` means a numeric value crossed the divergence cap before the iteration could settle.
+`status` and `feasible` are orthogonal. `status="converged"` with `feasible=False` is a clean infeasibility (the antichain settled at ⊤). `status="max_iter"` with `feasible=True` means the iteration cap was reached while the run still looked feasible; usually a sign to increase `max_iter`. `status="diverged"` means a numeric value crossed the divergence cap before the iteration could settle.
 
 ### Watching the solver work
 
