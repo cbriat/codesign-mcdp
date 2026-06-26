@@ -84,7 +84,7 @@
 % ---------------------------------------------------------------------------
 \title{\codename: A Python Library for \\ Monotone Co-Design Problems \\
        \vspace{0.4em} \large Version 0.1.0 -- Reference Manual}
-\author{Corentin Briat}
+\author{}
 \date{May 2026}
 
 \begin{document}
@@ -1978,14 +1978,15 @@ fee, short batch, smaller footprint at the same annual output).
 
 All parameters are calibrated to the 2024-2026 bioprocessing
 literature: specific productivity per cell line
-(Reinhart \etal\ 2021, Sumi \etal\ 2024), oxygen uptake rates and
-$k_L a$ correlations (BioProcess International 2024), bioreactor
-capex (Sustainability Atlas 2026, BioPlan 2025), media pricing
-(CHO media market report 2025), and metabolic constraints from
-Khattak \etal\ 2010 and Lao \& Toth 1997. The example is the first
-biotech-upstream application in the library and is intended both
-as a teaching example for the framework and as a starting point
-for discussions with industrial process-development groups.
+(Reinhart \etal\ 2021 [10], Sumi \etal\ 2024 [11]), oxygen uptake
+rates and $k_L a$ correlations (BioProcess International 2024),
+bioreactor capex (Sustainability Atlas 2026, BioPlan 2025), media
+pricing (CHO media market report 2025), and metabolic constraints
+from Khattak \etal\ 2010 [8] and Lao \& Toth 1997 [12]. The example
+is the first biotech-upstream application in the library and is
+intended both as a teaching example for the framework and as a
+starting point for discussions with industrial process-development
+groups.
 
 \subsection{Example 16: online DOE for the mAb fed-batch process}
 
@@ -1996,8 +1997,13 @@ where to operate within a tight 4D box of process parameters around
 a fixed line. This example fixes CHO-K1 and the 100 kg/year mission
 from example 15 and sweeps over a $5 \times 5 \times 5 \times 3 =
 375$-point grid of operating conditions (temperature, pH, glucose
-target, feed start day). Each candidate stands in for a 10 to
-14-day bioreactor run costing $\$20{,}000$ to $\$100{,}000$ in
+target, feed start day). The closed-form effect model that maps
+these conditions to effective productivity is calibrated from the
+process-parameter literature: temperature effects from Yoon
+\etal\ [5] and Sou \etal\ [6], pH and dissolved-oxygen effects from
+Trummer \etal\ [7], and glucose / feed effects from Khattak
+\etal\ [8] and Gagnon \etal\ [9]. Each candidate stands in for a 10
+to 14-day bioreactor run costing $\$20{,}000$ to $\$100{,}000$ in
 materials, labour, and analytics.
 
 The example compares two non-online baselines (a 75-run factorial
@@ -2082,17 +2088,18 @@ cheapest EV is \$64{,}666 with 58 g/km CO$_2$ but requires a
 2024 pack-level energy density (160 to 180 Wh/kg), matching the
 real-world absence of such a product.
 
-Calibration values cite \emph{Genta (2014)} for chassis, the
-\emph{Bosch Automotive Handbook} for engines, \emph{Heywood (2018)}
-and \emph{Pulkrabek (2003)} for ICE thermodynamics,
-\emph{Hofmann (2019)} for hybrid topologies, \emph{Naunheimer
-(2011)} for transmissions, \emph{Larminie and Lowry (2012)} for
-electric powertrain, the \emph{IEA Global EV Outlook 2024} for
-battery pricing, and the \emph{EPA Automotive Trends Report} for
-fleet averages. Numbers should be understood as ``within published
-ranges for production vehicles in the 2020 to 2024 generation,''
-not as production-precision OEM data; the framework's contribution
-is the compositional analysis, not the specific point values.
+Calibration values cite Genta and Morello [13] for the chassis, the
+Bosch Automotive Handbook [14] for engines, Pulkrabek [15] and
+Heywood [16] for ICE thermodynamics, Hofmann [17] for hybrid
+topologies, Naunheimer et al.\ [18] for transmissions, the IEA
+Global EV Outlook [19] and Larminie and Lowry [22] for the electric
+powertrain and battery pricing, Nemry et al.\ [20] for emission
+factors, the EPA Automotive Trends Report [21] for fleet averages,
+and Mock [23] for mass-versus-mission calibration. Numbers should be
+understood as ``within published ranges for production vehicles in
+the 2020 to 2024 generation,'' not as production-precision OEM data;
+the framework's contribution is the compositional analysis, not the
+specific point values.
 
 The block diagrams \texttt{docs/diagrams/car\_ice.svg},
 \texttt{car\_hev.svg}, \texttt{car\_ev.svg} show the full module
@@ -2257,7 +2264,16 @@ Imported as \texttt{from codesign import viz}. Functions:
 % ===========================================================================
 \addcontentsline{toc}{section}{References}
 
-\begin{enumerate}[label={[\arabic*]},leftmargin=2em]
+The framework references [1]--[4] underpin the theory and software.
+Entries [5]--[12] are the parameter-calibration sources for the
+monoclonal-antibody bioprocess examples (15 and 16); entries
+[13]--[23] are the calibration sources for the full-vehicle co-design
+example (17). All calibration values are illustrative, drawn from the
+published ranges in these sources, and are not OEM- or product-specific.
+
+\subsection*{Framework and theory}
+
+\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em]
   \item Andrea Censi. \emph{A Mathematical Theory of Co-Design}.
         arXiv:1512.08055, 2015.
         \url{https://arxiv.org/abs/1512.08055}
@@ -2270,6 +2286,71 @@ Imported as \texttt{from codesign import viz}. Functions:
         \url{https://arxiv.org/abs/2604.22624}
   \item The MCDPL software distribution.
         \url{https://co-design.science/software/}
+\end{enumerate}
+
+\subsection*{Bioprocess examples (15, 16)}
+
+\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=5]
+  \item M.-C. Yoon et al. Effect of culture temperature on antibody
+        production in NS0 cells. \emph{Biotechnology Progress}
+        19:1383--1386, 2003.
+  \item Z. Sou et al. Mild temperature shift in CHO cell cultures.
+        \emph{BMC Biotechnology} 15:64, 2015.
+  \item C. Trummer et al. Process parameter shifting: effect of pH and
+        dissolved oxygen. \emph{Biotechnology and Bioengineering}
+        94:1033--1044, 2006.
+  \item S. Khattak et al. Feed development for a fed-batch CHO process
+        by semi-steady-state analysis. \emph{Biotechnology Progress}
+        26:1671--1682, 2010.
+  \item N. Gagnon et al. High-end pH-controlled delivery of glucose
+        (HIPDOG). \emph{Biotechnology and Bioengineering}
+        108:1328--1337, 2011.
+  \item J. Reinhart et al. Bioprocessing of recombinant CHO cell lines:
+        productivity and product-quality benchmarks.
+        \emph{Applied Microbiology and Biotechnology}, 2021.
+  \item K. Sumi et al. High-productivity CHO cell-line development for
+        therapeutic antibodies. \emph{Journal of Bioscience and
+        Bioengineering}, 2024.
+  \item C. Lao and D. Toth. Effects of ammonium and lactate on growth
+        and metabolism of a recombinant CHO cell culture.
+        \emph{Biotechnology Progress} 13:688--691, 1997.
+\end{enumerate}
+
+\subsection*{Automotive co-design example (17)}
+
+\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=13]
+  \item G. Genta and L. Morello. \emph{The Automotive Chassis,
+        Vol. 1: Components Design}. Springer, 2009. (Suspension
+        stiffness, damper characteristics, brake sizing, tire load
+        ratings.)
+  \item Robert Bosch GmbH. \emph{Bosch Automotive Handbook}, 10th ed.,
+        2018. (Engine specific power, exhaust aftertreatment,
+        electrical loads.)
+  \item W.\,W. Pulkrabek. \emph{Engineering Fundamentals of the
+        Internal Combustion Engine}, 2nd ed. Pearson, 2003. (Thermal
+        efficiency, heat rejection, fuel flow rates.)
+  \item J.\,B. Heywood. \emph{Internal Combustion Engine
+        Fundamentals}, 2nd ed. McGraw-Hill, 2018. (Combustion
+        thermodynamics, BSFC ranges, durability.)
+  \item P. Hofmann. \emph{Hybridfahrzeuge}, 2nd ed. Springer, 2014.
+        (Power-split topologies, sizing rules, efficiency models.)
+  \item H. Naunheimer et al. \emph{Automotive Transmissions}, 2nd ed.
+        Springer, 2011. (Gearbox losses, weights, costs.)
+  \item International Energy Agency. \emph{Global EV Outlook}, 2023.
+        (Battery pack cost and pack-level energy-density trends,
+        2020--2030.)
+  \item F. Nemry et al. \emph{Environmental Improvement of Passenger
+        Cars}. JRC Scientific and Technical Reports, 2008. (CO\textsubscript{2}
+        emission factors, fuel densities, well-to-wheel.)
+  \item U.S. Environmental Protection Agency. \emph{Automotive Trends
+        Report}, 2024. (Fleet-average fuel economy, weight-class data,
+        drag-coefficient data.)
+  \item J. Larminie and J. Lowry. \emph{Electric Vehicle Technology
+        Explained}, 2nd ed. Wiley, 2012. (Motor efficiency maps,
+        inverter losses, charging-system architecture.)
+  \item P. Mock. \emph{European Passenger Car Market Statistics}.
+        International Council on Clean Transportation, 2023.
+        (Mass-versus-mission scatter data for calibration.)
 \end{enumerate}
 
 \end{document}
