@@ -19,6 +19,17 @@ on GitHub without running anything.
 | 10 | [`10_solver_trace.ipynb`](10_solver_trace.ipynb) | Solver observability: `trace`, `verbose`, `on_iteration`, and the `status` field, with a convergence plot. |
 | 11 | [`11_uncertain_drone.ipynb`](11_uncertain_drone.ipynb) | Set-based deterministic uncertainty: `Box` vs `Ellipsoid` worst case. |
 | 12 | [`12_stochastic_drone.ipynb`](12_stochastic_drone.ipynb) | Stochastic uncertainty with a Gaussian copula; mean, p95, CVaR95, and a histogram of the MC distribution. |
+| 13 | [`13_microgrid.ipynb`](13_microgrid.ipynb) | Microgrid sizing: generation, storage, and load balance as a co-design problem. |
+| 14 | [`14_online_fleet.ipynb`](14_online_fleet.ipynb) | Online learning of an unknown resource map for a fleet, with sample-efficient evaluators. |
+| 15 | [`15_bioprocess.ipynb`](15_bioprocess.ipynb) | Monoclonal-antibody upstream bioprocess: cell line, media, and bioreactor co-design. |
+| 16 | [`16_online_doe.ipynb`](16_online_doe.ipynb) | Online Design of Experiments for the bioprocess: factorial vs online evaluators at a fixed run budget. |
+| 17 | [`17_car_codesign.ipynb`](17_car_codesign.ipynb) | Full-vehicle co-design across ICE, hybrid, and EV architectures, with the mass spiral and energy-storage loop. |
+| 18 | [`18_metabolic_switching.ipynb`](18_metabolic_switching.ipynb) | Temporal Case 1: an organism switching metabolic architecture across carbon sources, with a re-acclimation cost. Burden curves and two switch-cost schedules. |
+| 19 | [`19_rover_modules.ipynb`](19_rover_modules.ipynb) | Temporal Case 2: a planetary rover activating and deactivating modules over a depleting/recharging battery, solved as a finite-horizon architecture DP. Battery traces for full and depleted starts. |
+| 20 | [`20_sequential_codesign.ipynb`](20_sequential_codesign.ipynb) | Antichain-valued sequential co-design: a multi-leg survey whose value is a whole Pareto front of (cost, CO2) totals. Front plot, polynomial front-growth check, and the monotonicity guard. |
+| 21 | [`21_reconfigurable_robot.ipynb`](21_reconfigurable_robot.ipynb) | Vector-state co-design: a self-reconfiguring robot carrying a three-axis state (two module wear levels plus energy), spreading wear across modules. Pareto-front plot and the vector monotonicity guard. |
+| 22 | [`22_online_feedback_codesign.ipynb`](22_online_feedback_codesign.ipynb) | Online feedback co-design: an adaptive sensor node that re-solves its co-design each step against its measured battery charge and live demand. Closed-loop audit trail and a charge/demand/config plot. |
+| 23 | [`23_formula1_season.ipynb`](23_formula1_season.ipynb) | Hierarchical co-design for a Formula 1 season (precompute-then-DP): race-level co-design frozen into a Pareto catalog, then a season MDP maximising expected championship points. Reproduces the paper's Fig. 1 race front and its two findings. |
 
 ## Running locally
 

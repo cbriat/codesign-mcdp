@@ -58,6 +58,61 @@ from .online import (
     OptimisticEvaluator,
     solve_online,
 )
+from .temporal import (
+    Architecture,
+    Epoch,
+    EpochResult,
+    ScheduleResult,
+    solve_schedule,
+)
+from .dynamic import (
+    DynamicPolicy,
+    DynamicResult,
+    Stage,
+    StageResult,
+    StateGrid,
+    rollout,
+    solve_and_rollout,
+    solve_dynamic,
+)
+from .sequential import (
+    MonotonicityReport,
+    SeqPolicy,
+    SeqResult,
+    SeqStage,
+    check_monotonicity,
+    detect_resets,
+    dp_over_catalog,
+    factorise_at_resets,
+    join_combine,
+    precompute_catalog,
+    solve_sequential,
+    sum_combine,
+)
+from .state import (
+    Axis,
+    ContinuousAxis,
+    DiscreteAxis,
+    StateVec,
+    VectorStateGrid,
+    make_state,
+    state_as_dict,
+    state_get,
+)
+from .vector_dp import (
+    VecPolicy,
+    VecResult,
+    VecStage,
+    VectorMonotonicityReport,
+    check_vector_monotonicity,
+    solve_vector_sequential,
+)
+from .online_codesign import (
+    ControlStep,
+    OnlineCoDesignResult,
+    resolve_at,
+    run_online_codesign,
+)
 from . import viz
 from . import diagram
 from .diagram import draw_system
@@ -78,5 +133,17 @@ __all__ = [
     "OptimisticEvaluator", "MonotonicityEvaluator", "LipschitzEvaluator",
     "LinearParametricEvaluator", "GaussianProcessEvaluator",
     "OnlineResult", "solve_online",
+    "Architecture", "Epoch", "EpochResult", "ScheduleResult", "solve_schedule",
+    "Stage", "StageResult", "DynamicResult", "StateGrid", "DynamicPolicy",
+    "solve_dynamic", "rollout", "solve_and_rollout",
+    "SeqStage", "SeqResult", "SeqPolicy", "solve_sequential",
+    "sum_combine", "join_combine", "MonotonicityReport",
+    "check_monotonicity", "detect_resets", "factorise_at_resets",
+    "precompute_catalog", "dp_over_catalog",
+    "StateVec", "make_state", "state_get", "state_as_dict",
+    "Axis", "ContinuousAxis", "DiscreteAxis", "VectorStateGrid",
+    "VecStage", "VecResult", "VecPolicy", "solve_vector_sequential",
+    "VectorMonotonicityReport", "check_vector_monotonicity",
+    "ControlStep", "OnlineCoDesignResult", "resolve_at", "run_online_codesign",
     "draw_system",
 ]

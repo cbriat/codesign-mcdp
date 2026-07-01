@@ -1976,17 +1976,15 @@ contains a genuine two-point tradeoff between CHO-K1 (low licence
 fee, long batch, larger footprint per year) and CHO-MK (high licence
 fee, short batch, smaller footprint at the same annual output).
 
-All parameters are calibrated to the 2024-2026 bioprocessing
-literature: specific productivity per cell line
-(Reinhart \etal\ 2021 [10], Sumi \etal\ 2024 [11]), oxygen uptake
-rates and $k_L a$ correlations (BioProcess International 2024),
-bioreactor capex (Sustainability Atlas 2026, BioPlan 2025), media
-pricing (CHO media market report 2025), and metabolic constraints
-from Khattak \etal\ 2010 [8] and Lao \& Toth 1997 [12]. The example
-is the first biotech-upstream application in the library and is
-intended both as a teaching example for the framework and as a
-starting point for discussions with industrial process-development
-groups.
+All parameters are calibrated to ranges reported in the
+bioprocessing literature: specific productivity per cell line
+(Reinhart \etal\ 2019 [10]), oxygen uptake rates and $k_L a$
+correlations, bioreactor capex, and media pricing, with the metabolic
+constraints taken from Khattak \etal\ 2010 [8] and Lao \& Toth
+1997 [11]. The example is the first biotech-upstream application in
+the library and is intended both as a teaching example for the
+framework and as a starting point for discussions with industrial
+process-development groups.
 
 \subsection{Example 16: online DOE for the mAb fed-batch process}
 
@@ -2088,14 +2086,14 @@ cheapest EV is \$64{,}666 with 58 g/km CO$_2$ but requires a
 2024 pack-level energy density (160 to 180 Wh/kg), matching the
 real-world absence of such a product.
 
-Calibration values cite Genta and Morello [13] for the chassis, the
-Bosch Automotive Handbook [14] for engines, Pulkrabek [15] and
-Heywood [16] for ICE thermodynamics, Hofmann [17] for hybrid
-topologies, Naunheimer et al.\ [18] for transmissions, the IEA
-Global EV Outlook [19] and Larminie and Lowry [22] for the electric
-powertrain and battery pricing, Nemry et al.\ [20] for emission
-factors, the EPA Automotive Trends Report [21] for fleet averages,
-and Mock [23] for mass-versus-mission calibration. Numbers should be
+Calibration values cite Genta and Morello [12] for the chassis, the
+Bosch Automotive Handbook [13] for engines, Pulkrabek [14] and
+Heywood [15] for ICE thermodynamics, Hofmann [16] for hybrid
+topologies, Naunheimer et al.\ [17] for transmissions, the IEA
+Global EV Outlook [18] and Larminie and Lowry [21] for the electric
+powertrain and battery pricing, Nemry et al.\ [19] for emission
+factors, the EPA Automotive Trends Report [20] for fleet averages,
+and Mock [22] for mass-versus-mission calibration. Numbers should be
 understood as ``within published ranges for production vehicles in
 the 2020 to 2024 generation,'' not as production-precision OEM data;
 the framework's contribution is the compositional analysis, not the
@@ -2110,11 +2108,400 @@ via Tarjan's algorithm; in all three architectures the cycle
 includes every load-bearing module plus the powertrain.
 
 % ===========================================================================
+\section{Temporal, Vector-State, and Online Co-Design}
+\label{sec:temporal}
+% ===========================================================================
+
+The examples up to 17 solve a co-design problem \emph{once}: a fixed
+functionality is posed and the Kleene iteration returns the minimal
+resource antichain. Many engineering systems are not static. The best
+architecture changes as the environment changes; a resource is spent or
+worn across a sequence of stages; the design must be re-decided online as
+measurements arrive. This section documents the six layers the package
+adds on top of the ordinary \texttt{solve()} to handle these regimes, and
+the theory that makes them exact. All six reuse a common decision object,
+the \texttt{Architecture} (a named wrapper around a \texttt{System}), so
+they compose with the whole rest of the framework.
+
+\subsection{Case 1: architecture switching (\texttt{temporal})}
+
+The simplest temporal problem is \emph{switching}: a system whose best
+architecture changes because the environment changes, with a cost to
+switch. The environment is a sequence of epochs, each posing its own
+functionality and admitting a subset of candidate architectures.
+\texttt{solve\_schedule} chooses one architecture per epoch to minimise
+the total of the per-epoch co-design costs plus the switching costs, by an
+exact Viterbi (shortest-path) pass over the epoch-by-architecture lattice.
+The switching cost may be a uniform scalar or a per-transition callable,
+and a hysteresis parameter lets a brief unfavourable epoch be ridden out
+on the incumbent rather than switched into and back out of. The per-epoch
+cost is a full \texttt{solve()}, so switching sits on top of static
+co-design rather than replacing it.
+
+\subsection{Case 2, scalar value: dynamic programming (\texttt{dynamic})}
+
+When a resource is carried \emph{between} stages, the problem becomes a
+dynamic program. \texttt{solve\_dynamic} runs a finite-horizon backward
+Bellman recursion whose per-stage decision is which architecture to
+instantiate, whose per-stage cost is itself a co-design \texttt{solve()},
+and whose carried scalar state (fuel, charge, cumulative wear) is advanced
+by a user \texttt{transition}. The value function is scalar: at each
+(stage, state) it is the single best cost-to-go. The state is discretised
+onto an explicit \texttt{StateGrid}; a transition that would leave the
+grid envelope is rejected \emph{before} snapping, so an over-spent
+resource (a negative fuel level) is never silently rescued by the nearest
+in-range node. The solver returns a state-indexed \texttt{DynamicPolicy},
+queryable in closed loop at off-nominal states, and \texttt{rollout}
+threads it forward from a concrete initial state.
+
+\subsection{Case 2, antichain value: sequential co-design (\texttt{sequential})}
+\label{sec:sequential}
+
+The multi-objective generalisation replaces the scalar value with a Pareto
+antichain. Following the sequential co-design theory, fix an ordered
+commutative resource monoid $(R, \le, \oplus, 0)$ and work in the value
+space of upper sets of $R$ ordered by reverse inclusion (a larger feasible
+set is a lower resource threshold, hence ``easier''). A sequential
+co-design problem over stages $0,\dots,N$ and a state poset
+$(X, \le_X, \bot_X)$ assigns to each stage $k$ a state-parametrised
+minimal-resource map $h_k : X \to \mathcal{U}R$ and a transition
+$\phi_k : X \times R \to X$. The value is the backward recursion
+$V_{N+1} \equiv R$ and
+\[
+  V_k(x) \;=\; \mathrm{Min} \bigcup_{r \in h_k(x)}
+      \Bigl( \uparrow\! r \;\oplus\; V_{k+1}\bigl(\phi_k(x, r)\bigr) \Bigr),
+\]
+the antichain-valued Bellman operator, implemented by
+\texttt{Antichain.union\_min}. In the package the accumulated resource
+(the named cost axes on the antichain) is kept deliberately \emph{distinct}
+from the carried state $x$: the transition reads any carried quantity off
+the full solved point, while only the cost axes accumulate on the front.
+The scalar \texttt{dynamic} layer is the width-one special case (a single
+cost axis gives a singleton antichain).
+
+Three results are made operational. \textbf{(Q1) Monotone value.} If, for
+every stage, (H1) $h_k$ is monotone in the carried state (more carried
+state makes the stage no easier) and (H2) $\phi_k$ is monotone in the
+state, then every $V_k$ is monotone. (H1) is load-bearing and necessary.
+\texttt{check\_monotonicity} verifies both on the state grid; it is
+orientation-aware, accepting the benign ``consumable but monotone''
+orientation (a budget carried as remaining slack) and flagging only
+genuinely non-monotone (perishable or fatigue-as-state) stages, which have
+an interior optimum and fall outside the guarantee.
+\textbf{(Q2) Front $=$ reachable frontier.} $\mathrm{Min}\,V_k(x)$ equals
+the antichain of minimal reachable cumulative resources over feasible
+choice sequences; there is no tail-pruning gap, and the front size is the
+width of the reachable set, which grows polynomially in the horizon for a
+summed objective on a fixed number of axes (\texttt{sum\_combine}) and
+stays bounded for a renewable one (\texttt{join\_combine}).
+\textbf{(Q3) Exact factorisation.} At a reset stage (a quiescent
+transition landing on $\bot_X$ regardless of input),
+\texttt{detect\_resets} and \texttt{factorise\_at\_resets} split the
+horizon into a $\oplus$-product of independent sub-problems, the
+order-theoretic deterministic analogue of regeneration-point
+decomposition; the proof uses only distributivity, so it holds in every
+regime.
+
+\subsection{The general carried state: vectors (\texttt{state}, \texttt{vector\_dp})}
+\label{sec:vector}
+
+Realistic problems carry structured state, not a lone scalar. The Formula 1
+seasonal co-design of Neumann, Zardini, and colleagues [23] carries a
+state vector of two battery-wear levels plus a discrete regulatory-penalty
+flag; a self-reconfiguring robot carries the accumulated wear of each drive
+module plus a shared energy budget. The \texttt{state} module provides a
+\texttt{VectorStateGrid}: a product grid over named axes, each either a
+\texttt{ContinuousAxis} (a bucketed real interval, snapped and
+bounds-checked like the scalar grid) or a \texttt{DiscreteAxis} (a finite
+labelled set with a caller-supplied order, or mutually incomparable when no
+order is given). \texttt{solve\_vector\_sequential} runs the same
+antichain-valued Bellman recursion carrying the full state vector, with the
+transition returning an $\{\text{axis} : \text{value}\}$ mapping snapped
+onto the product grid and out-of-bounds successors rejected on every axis.
+The monotonicity results carry over verbatim with the component-wise
+product order substituted for the scalar order, and
+\texttt{check\_vector\_monotonicity} verifies (H1)/(H2) over that order. A
+single-axis grid reproduces the scalar \texttt{sequential} result exactly,
+so the vector layer strictly generalises rather than parallels it.
+
+A subtle correctness point governs the backward pass. The stage antichain
+must not be Pareto-reduced on the cost axes \emph{before} the transition is
+applied: a point dominated on cost may be the only feasible choice from a
+constrained carried state (a higher-cost morphology that spares a worn
+module), and its consequence for the carried state is invisible in the
+cost projection. The implementation therefore enumerates all solved points
+and lets \texttt{union\_min} prune only after the transition. This is what
+makes the reconfigurable-robot example (21) feasible.
+
+\subsection{Precompute-then-DP: the Formula 1 structure}
+\label{sec:precompute}
+
+There are two distinct ways to combine co-design with dynamic programming,
+and they should not be conflated. The \texttt{sequential} solver above
+re-solves the co-design at every (stage, state), which is necessary when
+the per-stage functionality depends on the carried state. The Formula 1
+seasonal framework [23] uses the cheaper opposite order: the co-design
+layer is run \emph{once} to produce track-dependent Pareto-optimal
+performance-versus-wear mappings, which are then frozen into a catalog of
+implementations that an outer finite-horizon dynamic program selects
+among. No co-design solve happens inside the Bellman sweep; the DP only
+indexes the precomputed catalog. The package exposes this explicitly:
+\texttt{precompute\_catalog} solves the architectures once at a fixed
+functionality and returns the tagged Pareto catalog (retaining points that
+look dominated at the single-stage level, since they may become optimal
+once aggregated in the DP, exactly the F1 paper's observation), and
+\texttt{dp\_over\_catalog} runs the antichain-valued DP selecting catalog
+indices. Precompute-then-DP agrees exactly with \texttt{solve\_sequential}
+when the co-design is state-independent, and is preferred there for cost;
+when the co-design genuinely depends on the carried state, only the
+re-solving \texttt{sequential} form is correct.
+
+\subsection{Online feedback co-design (\texttt{online\_codesign})}
+\label{sec:online-cd}
+
+The layers above are open-loop planners: the whole horizon is solved in
+advance. The closed-loop counterpart re-decides the design online as
+measurements arrive. \texttt{run\_online\_codesign} implements a
+receding-horizon, measurement-in-the-loop controller: at each step it
+(i) senses the measured state of the running process, (ii) reads the live
+requirement and environmental conditions, (iii) re-solves the co-design at
+those conditions over the admissible architectures (\texttt{resolve\_at}
+picks the cheapest feasible point), (iv) applies the chosen configuration
+by stepping the \emph{true} plant, and (v) logs a \texttt{ControlStep}.
+Because the plant is stepped with the true process rather than a nominal
+transition, any divergence between plan and execution is absorbed by the
+next sensing step, which is what distinguishes feedback from open-loop
+replay. This is the co-design instance of control co-design (CCD, [25]) in
+its nested form, here the myopic variant (re-solve a single static
+co-design each step); the model is assumed known, so measurements update
+the carried state and the conditions but not the co-design model itself.
+Two natural extensions are a receding-horizon lookahead that plans several
+steps ahead with the vector DP and commits only the first, and online
+learning of the model from measurements (coupling in the online-learning
+layer of section~\ref{sec:online-learning}); both are left for future increments.
+
+\subsection{Temporal worked examples (18--23)}
+
+\subsubsection*{Example 18: metabolic architecture switching}
+\texttt{18\_metabolic\_switching.py}. The first temporal example (Case 1).
+An organism alternates between a glycolytic architecture (cheap, capped
+growth) on glucose and a gluconeogenic one (costlier, higher ceiling, a
+fixed glyoxylate-shunt overhead) on acetate, with a re-acclimation cost to
+switch, the diauxic-shift lag. A contested \texttt{mixed} epoch, flanked by
+acetate, is served by the cheaper glycolytic pathway under a low switch
+cost (four switches) but ridden out on the incumbent under a high one (two
+switches): identical environment, different switching economics,
+qualitatively different metabolic program.
+
+\subsubsection*{Example 19: rover module activation}
+\texttt{19\_rover\_modules.py}. Case 2 with a scalar carried state. A
+planetary rover activates and deactivates modules (drive, science, comms,
+survival) across mission phases on a battery that depletes and recharges
+from solar. The same \texttt{DynamicPolicy} runs science-heavy from a full
+battery and steps down to lighter modes as reserve falls, and holds a
+light mode throughout from a depleted start; the framing follows standard
+spacecraft power-mode practice.
+
+\subsubsection*{Example 20: antichain-valued sequential co-design}
+\texttt{20\_sequential\_codesign.py}. A multi-leg survey whose value at
+each stage is a whole Pareto front of cumulative (cost, CO$_2$) totals. The
+solver returns the exact reachable frontier of whole-mission plans (all
+rapid, cheapest and dirtiest, through all eco, cleanest and costliest, with
+interior mixes), and demonstrates the polynomial (linear here) front-width
+growth and the passing (H1)/(H2) monotonicity guard.
+
+\subsubsection*{Example 21: reconfigurable robot with a state vector}
+\texttt{21\_reconfigurable\_robot.py}. The vector-state layer. A field
+robot reconfigures between tracked, wheeled, and hybrid morphologies across
+five legs, carrying a three-axis state vector: per-module wear for two
+independent drive modules plus a shared energy budget. The morphologies are
+cost-incomparable (tracked cheaper on energy, wheeled on operations), so
+the mission Pareto front is a five-point (energy, ops) staircase, each
+point a different morphology schedule that spreads wear across the modules
+so neither hits its limit and forces an expensive fallback. This is the
+structured multi-component state of the F1 seasonal problem, in a robotics
+setting.
+
+\subsubsection*{Example 22: online feedback co-design}
+\texttt{22\_online\_feedback\_codesign.py}. The closed-loop layer. A
+solar-powered sensor node re-solves its co-design each step against its
+measured battery charge and the live data-rate demand. A storm raises the
+demand mid-run and the node escalates to a high-rate configuration; as the
+measured charge falls the re-solve is gated (a hungry configuration becomes
+infeasible when charge is low) and the node falls back through nominal to
+low-power, then climbs back as solar recovers. The audit trail records
+every decision, condition, and outcome. No offline plan is followed; each
+step is solved against what actually happened.
+
+\subsubsection*{Example 23: hierarchical co-design for a Formula 1 season}
+\texttt{23\_formula1\_season.py}. A faithful reproduction, in the
+framework's vocabulary, of the seasonal co-design of Neumann,
+Habermacher, Fieni, Cerofolini, Zardini, and Onder [23], and the
+canonical instance of the precompute-then-DP structure of
+section~\ref{sec:precompute}. The two layers are explicit. The
+\emph{race-level co-design} (layer one) is a genuine MCDP solve: for each
+track, battery size, and discretised incoming battery age, a
+\texttt{CatalogDP} over energy-deployment strategies emits a Pareto front
+of \texttt{(race\_time, wear)}, since deploying more electrical energy
+lowers race time but ages the battery faster, and an aged pack (less
+usable energy) cannot reach the low race times a fresh one can.
+\texttt{precompute\_catalog} freezes that front. The \emph{season-level
+dynamic program} (layer two) is a scalar-maximisation MDP carrying the
+state vector $(w_{b,1}, w_{b,2}, x_{\mathrm{ex}})$, the fractional wear of
+the two regulation-permitted battery units plus a flag recording whether a
+replacement penalty has been incurred. At each race the controls are which
+unit to run, which frozen implementation (deployment strategy) to select,
+and whether to install a fresh unit (a grid penalty of ten places for the
+first replacement, five for each later one, per the modelled FIA rules).
+Race time maps to a finishing position through an empirical time-gap model
+and a probabilistic grid-start correction scaled by the track's overtaking
+difficulty, and the finishing-position distribution is integrated against
+the FIA points table to give the race's expected championship points; the
+DP maximises the season total by backward induction. No co-design solve
+happens inside the season sweep, which is what distinguishes this from the
+re-solving \texttt{sequential} DP.
+
+Two of the paper's findings are reproduced. First, the optimal policy
+accepts a \emph{local penalty for a global gain}: it takes a battery
+replacement at one race, sacrificing points that day (a worse grid slot),
+to keep a fresh, low-wear pack available for aggressive deployment across
+the remaining races, raising the season total. Second, race order shifts
+the optimal policy: because the grid-penalty cost is track-dependent (a
+replacement hurts far more at a hard-to-overtake circuit than at a
+low-downforce one), reordering the calendar moves the optimal replacement
+onto a cheaper track, so the attainable total is near-invariant while the
+policy adapts, the temporal coupling the paper emphasises. The season DP
+is validated against exhaustive brute-force enumeration (single- and
+mixed-battery unit configurations) in \texttt{tests/test\_formula1.py};
+the DP optimum matches the brute-force optimum exactly.
+
+The example and notebook 23 also regenerate the paper's three key figures
+\emph{in the same format}, for visual comparison: the race-time-versus-wear
+Pareto fronts per battery size and initial age (the paper's Fig.~1, with
+the fastest-implementation node A and a trade-off node B highlighted), the
+grid-start position penalty $\mu_{\mathrm{pos}} \pm \sigma_{\mathrm{pos}}$
+with its zero-crossing at the reference slot, saturation beyond roughly
+P12, and harder-track ordering (the paper's Fig.~2), and the
+finishing-position density $\varphi(\mathrm{Pos}_{\mathrm{end}})$ for two
+grid starts (the paper's Fig.~3). These reproduce the paper's figure
+\emph{structure and qualitative behaviour} from the framework's own
+co-design solves and position model; they are deliberately not a numerical
+match, since the paper's fronts come from an optimal-control lap simulation
+and a battery-health model, and its position model is fitted from FIA race
+data, none of which is reproduced here. The example labels the figures as
+such. The sense in which the framework ``does the same thing'' is that it
+produces the same structured artefacts (Pareto fronts, penalty curves,
+finishing densities) feeding the same season-level dynamic program, not
+that it recovers the paper's specific numbers.
+
+% ===========================================================================
+\section{Realistic Problem Domains for Temporal Co-Design}
+\label{sec:domains}
+% ===========================================================================
+
+The temporal, vector-state, and online layers of
+section~\ref{sec:temporal} were built with concrete application domains in
+mind. This section surveys realistic problems, drawn from the recent
+literature, that map onto these layers, as candidates for future worked
+examples and as evidence that the abstractions are not invented in a
+vacuum. Each paragraph names the co-design structure (which layer applies)
+alongside the domain.
+
+\subsection{Self-reconfiguring and modular robots}
+
+Self-reconfiguring modular robots deliberately change their morphology, by
+rearranging the connectivity of their modules, to adapt to terrain, task,
+or damage [26]: a worm shape for a pipe, legs for rough ground, a wheel
+for flat terrain. This is directly the temporal switching and vector-state
+setting: the morphology is the architecture, the terrain or task sequence
+is the environment, and per-module wear plus shared energy is the carried
+state vector (example 21 is a first cut). Recent work makes the coupling
+sharper. Terrain-aware morphology search in dynamic environments [27]
+chooses a morphology per scene under an energy budget; multi-task space
+applications map task requirements to modular-unit morphology through an
+inverse-mapping design step [28]; and reconfigurable cobots such as the
+CONCERT platform and freeform strut-node systems (FreeSN, SMORES) expose a
+catalog of admissible configurations with real reconfiguration costs, the
+switching-cost term of \texttt{solve\_schedule}. Floor-cleaning tiling
+robots (hTrihex, hTetro) reconfigure to cover obstacle-strewn areas at
+lower energy than fixed-shape coverage planning [29], an energy-versus-
+coverage Pareto per configuration.
+
+\subsection{Programmable self-assembly}
+
+Programmable self-assembly designs building blocks with tunable binding
+interactions so they assemble into a target structure. The design problem
+is multi-objective, trading assembly \emph{yield}, assembly \emph{speed},
+and \emph{economy} (number of distinct particle species), which is exactly
+a Pareto-front co-design. H\"ubl and Goodrich show that simultaneously
+optimising assembly time and yield through the binding-energy and
+concentration design space can speed assembly by orders of magnitude
+without lowering yield, and that economical, semi-addressable designs
+(reusing building blocks) can beat fully-addressable ones on all three
+axes [30, 31]. The temporal angle is the assembly \emph{protocol}: a
+staged schedule of temperature or concentration set-points is a sequence of
+co-design decisions coupled by the carried state of intermediate-species
+concentrations, a natural fit for the vector-state sequential DP, with
+Markov-state-model protocol optimisation [32] as the dynamic backbone.
+
+\subsection{Multi-objective protein design}
+
+Protein design inherently trades competing objectives, stability, function,
+solubility, immunogenicity, and manufacturability, and Pareto-based
+multi-objective sampling produces candidate sets spanning these trade-offs
+for informed downstream selection [33]. This is a co-design antichain over
+design objectives. Recent methods make the front explicit: ST-PARM aligns
+inference-time generation to a controllable stability-versus-function
+trade-off; MosPro and NSGA-2 variants produce Pareto-optimal sequence sets;
+MAProt negotiates a structure-versus-function consensus across agents. The
+temporal and online angle is closed-loop directed evolution: frameworks
+such as EVOLVEpro couple a generative or predictive model with iterative
+wet-lab feedback, proposing a batch, measuring it, and updating, which is
+precisely the online feedback co-design loop of section~\ref{sec:online-cd}
+with the measured functionality replacing the modelled one (the model-
+learning extension of that loop).
+
+\subsection{Control co-design (CCD)}
+
+Control co-design, the simultaneous optimisation of a physical plant and
+its controller, is an established engineering discipline, described by
+Garcia-Sanz as a game changer [25], with two standard paradigms: nested
+(an outer plant loop wrapping an inner control solve) and simultaneous [24].
+The nested paradigm is exactly the structure of the online co-design loop.
+Concrete instances that map onto the temporal and online layers include
+robust control co-design with a receding-horizon MPC inner loop [34];
+plant-and-controller optimisation for energy systems with MPC [35];
+control co-design of spacecraft trajectory and rocket-engine design in
+NASA's OpenMDAO/GMAT tooling; digital-twin control co-design of active
+suspensions via reinforcement learning; and adaptive MPC with online
+recursive-least-squares identification for load-frequency control under
+renewable disturbances, the archetype of the model-learning extension.
+These supply both the vocabulary (plant, controller, nested vs simultaneous)
+and the benchmark problems (active suspension, hybrid-electric vehicle,
+airborne wind energy) for positioning the online layer.
+
+\subsection{Summary of the mapping}
+
+Across these domains the same three structural questions recur, and the
+package answers each: which architecture to run as conditions change
+(switching, \texttt{temporal}); how a resource or wear vector carried
+across stages shapes the optimal schedule (vector-state DP,
+\texttt{vector\_dp}); and how to re-decide the design online from
+measurements (feedback, \texttt{online\_codesign}). The reconfigurable
+robot (21) and adaptive sensor node (22) are first worked examples in the
+robotics and control-co-design cells of this table; self-assembly and
+protein design are identified as high-value future examples whose
+multi-objective, staged-protocol, and closed-loop-evolution structure the
+existing layers already support.
+
+% ===========================================================================
 \section{Modelling Guidelines and Pitfalls}
 \label{sec:guidelines}
 % ===========================================================================
 
 A few patterns that come up repeatedly when authoring MCDPs.
+
+
 
 \paragraph{Expose loop variables you want to inspect.} When using the
 operator API directly, \texttt{Loop} projects its axis out of the
@@ -2265,11 +2652,14 @@ Imported as \texttt{from codesign import viz}. Functions:
 \addcontentsline{toc}{section}{References}
 
 The framework references [1]--[4] underpin the theory and software.
-Entries [5]--[12] are the parameter-calibration sources for the
+Entries [5]--[11] are the parameter-calibration sources for the
 monoclonal-antibody bioprocess examples (15 and 16); entries
-[13]--[23] are the calibration sources for the full-vehicle co-design
-example (17). All calibration values are illustrative, drawn from the
-published ranges in these sources, and are not OEM- or product-specific.
+[12]--[22] are the calibration sources for the full-vehicle co-design
+example (17); entries [23]--[35] underpin the temporal, vector-state,
+and online co-design layers (sections~\ref{sec:temporal}--\ref{sec:domains},
+examples 18--22) and the realistic problem domains surveyed there. All
+calibration values are illustrative, drawn from the published ranges in
+these sources, and are not OEM- or product-specific.
 
 \subsection*{Framework and theory}
 
@@ -2291,26 +2681,32 @@ published ranges in these sources, and are not OEM- or product-specific.
 \subsection*{Bioprocess examples (15, 16)}
 
 \begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=5]
-  \item M.-C. Yoon et al. Effect of culture temperature on antibody
-        production in NS0 cells. \emph{Biotechnology Progress}
-        19:1383--1386, 2003.
-  \item Z. Sou et al. Mild temperature shift in CHO cell cultures.
-        \emph{BMC Biotechnology} 15:64, 2015.
-  \item C. Trummer et al. Process parameter shifting: effect of pH and
-        dissolved oxygen. \emph{Biotechnology and Bioengineering}
-        94:1033--1044, 2006.
-  \item S. Khattak et al. Feed development for a fed-batch CHO process
-        by semi-steady-state analysis. \emph{Biotechnology Progress}
-        26:1671--1682, 2010.
-  \item N. Gagnon et al. High-end pH-controlled delivery of glucose
-        (HIPDOG). \emph{Biotechnology and Bioengineering}
-        108:1328--1337, 2011.
-  \item J. Reinhart et al. Bioprocessing of recombinant CHO cell lines:
-        productivity and product-quality benchmarks.
-        \emph{Applied Microbiology and Biotechnology}, 2021.
-  \item K. Sumi et al. High-productivity CHO cell-line development for
-        therapeutic antibodies. \emph{Journal of Bioscience and
-        Bioengineering}, 2024.
+  \item S.K. Yoon, S.H. Kim, and G.M. Lee. Effect of low culture
+        temperature on specific productivity and transcription level of
+        anti-4-1BB antibody in recombinant Chinese hamster ovary (CHO)
+        cells. \emph{Biotechnology Progress} 19:1383--1386, 2003.
+  \item S.N. Sou, C. Sellick, K. Lee, et al. How does mild hypothermia
+        affect monoclonal antibody glycosylation? \emph{Biotechnology
+        and Bioengineering} 112(6):1165--1176, 2015.
+  \item E. Trummer, K. Fauland, S. Seidinger, et al. Process parameter
+        shifting: Part I. Effect of DOT, pH, and temperature on the
+        performance of Epo-Fc expressing CHO cells cultivated in
+        controlled batch bioreactors. \emph{Biotechnology and
+        Bioengineering} 94(6):1033--1044, 2006.
+  \item S.F. Khattak, Z. Xing, B. Kenty, I. Koyrakh, and Z.J. Li. Feed
+        development for a fed-batch CHO production process by
+        semi-steady-state analysis. \emph{Biotechnology Progress}
+        26(3):797--804, 2010.
+  \item M. Gagnon, G. Hiller, Y.-T. Luan, A. Kittredge, J. DeFelice,
+        and D. Drapeau. High-end pH-controlled delivery of glucose
+        (HIPDOG) effectively suppresses lactate accumulation in CHO
+        fed-batch cultures. \emph{Biotechnology and Bioengineering}
+        108(6):1328--1337, 2011.
+  \item D. Reinhart, L. Damjanovic, C. Kaisermayer, W. Sommeregger,
+        A. Gili, B. Gasselhuber, et al. Bioprocessing of recombinant
+        CHO-K1, CHO-DG44, and CHO-S: CHO expression hosts favor either
+        mAb production or biomass synthesis. \emph{Biotechnology
+        Journal} 14(3):e1700686, 2019.
   \item C. Lao and D. Toth. Effects of ammonium and lactate on growth
         and metabolism of a recombinant CHO cell culture.
         \emph{Biotechnology Progress} 13:688--691, 1997.
@@ -2318,7 +2714,7 @@ published ranges in these sources, and are not OEM- or product-specific.
 
 \subsection*{Automotive co-design example (17)}
 
-\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=13]
+\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=12]
   \item G. Genta and L. Morello. \emph{The Automotive Chassis,
         Vol. 1: Components Design}. Springer, 2009. (Suspension
         stiffness, damper characteristics, brake sizing, tire load
@@ -2348,9 +2744,67 @@ published ranges in these sources, and are not OEM- or product-specific.
   \item J. Larminie and J. Lowry. \emph{Electric Vehicle Technology
         Explained}, 2nd ed. Wiley, 2012. (Motor efficiency maps,
         inverter losses, charging-system architecture.)
-  \item P. Mock. \emph{European Passenger Car Market Statistics}.
-        International Council on Clean Transportation, 2023.
-        (Mass-versus-mission scatter data for calibration.)
+  \item P. Mock et al. \emph{European Vehicle Market Statistics
+        Pocketbook 2023/24}. International Council on Clean
+        Transportation, 2023. (Mass-versus-mission scatter data for
+        calibration.)
+\end{enumerate}
+
+\subsection*{Temporal, vector-state, and online co-design (18--22, sections~\ref{sec:temporal}--\ref{sec:domains})}
+
+\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=23]
+  \item M.-P. Neumann, R. Habermacher, G. Fieni, A. Cerofolini,
+        G. Zardini, and C.\,H. Onder. Hierarchical Co-Design for
+        Multi-Race Strategy Optimization in Formula~1. In
+        \emph{29th IEEE Intelligent Transportation Systems Conference
+        (ITSC)}, 2026 (in press). ETH Research Collection
+        \url{https://doi.org/10.3929/ethz-c-000784888}. (The
+        precompute-then-DP structure and the multi-component seasonal
+        state vector.)
+  \item D.\,R. Herber and J.\,T. Allison. Nested and Simultaneous
+        Solution Strategies for General Combined Plant and Control
+        Design Problems. \emph{Journal of Mechanical Design}
+        141(1):011402, 2018. (The nested vs simultaneous CCD
+        paradigms.)
+  \item M. Garcia-Sanz. Control Co-Design: An engineering game changer.
+        \emph{Advanced Control for Applications} 1(1):e18, 2019.
+  \item Self-reconfiguring modular robots (overview). See e.g.\
+        \emph{Modular reconfigurable robots: Toward on-demand
+        multifunctional applications}, Science Robotics, 2024, and the
+        survey \emph{Modular Self-Configurable Robots---The State of
+        the Art}, Actuators 12(9):361, 2023.
+  \item Z. Liu, Q. Lu, J. Luo, and Z. Wang. Terrain-aware morphology
+        searching algorithm for self-reconfigurable modular robot in
+        dynamic environment. \emph{Applied Soft Computing} 186:114182,
+        2026.
+  \item X. An, Q. Jia, G. Chen, Y. Liu, and H. Liu. Morphological
+        Design and Performance Analysis of a Self-reconfigurable
+        Modular Robot for Multi-task Space Applications.
+        \emph{Journal of Mechanical Engineering} 61(21):152--167, 2025.
+  \item Modular Self-Configurable Robots---The State of the Art.
+        \emph{Actuators} 12(9):361, 2023. (Floor-cleaning tiling
+        robots hTrihex/hTetro and reconfiguration for coverage.)
+  \item M.\,C. H\"ubl and C.\,P. Goodrich. Simultaneous optimization of
+        assembly time and yield in programmable self-assembly.
+        \emph{The Journal of Chemical Physics} 164(8):084904, 2026.
+  \item M.\,C. H\"ubl and C.\,P. Goodrich. Accessing Semi-Addressable
+        Self-Assembly with Efficient Structure Enumeration.
+        \emph{Physical Review Letters} 134(5):058204, 2025.
+  \item Optimization of Non-Equilibrium Self-Assembly Protocols Using
+        Markov State Models. arXiv:2210.05749. (Staged assembly-protocol
+        optimisation.)
+  \item Multi-objective protein design (representative works):
+        \emph{Searching for the Pareto frontier in multi-objective
+        protein design}, Biophysical Reviews 9:311--324, 2017;
+        MosPro, \emph{Pareto-optimal sampling for multi-objective
+        protein sequence design}, 2025; ST-PARM and MAProt, bioRxiv,
+        2026; EVOLVEpro (closed-loop directed evolution).
+  \item J. Sun et al. Robust Control Co-Design with Receding-Horizon
+        MPC. arXiv:2104.02025. (The online-feedback co-design pattern.)
+  \item D.\,J. Docimo, Z. Kang, K.\,A. James, and A.\,G. Alleyne.
+        Plant and Controller Optimization for Power and Energy Systems
+        with Model Predictive Control. \emph{Journal of Dynamic
+        Systems, Measurement, and Control}, 2021.
 \end{enumerate}
 
 \end{document}

@@ -1895,7 +1895,7 @@ A biopharmaceutical company has to deliver a monoclonal antibody at a target tit
 
 The cycles are real biology: higher titer needs higher cell density, which needs higher kLa (more capable bioreactor), which the media must support. Richer feed produces more lactate and ammonia, which inflates the cell density required to deliver the same titer (closing the loop). The Kleene iteration converges this automatically.
 
-All parameters are taken from the 2024-2026 bioprocessing literature: cell-line specific productivity (Reinhart 2021, Sumi 2024), oxygen uptake rates (BioProcess International 2024), media costs (CHO media market 2025), bioreactor capex (Sustainability Atlas 2026, BioPlan 2025), metabolic constraints (Khattak 2010, Lao & Toth 1997).
+All parameters are taken from the bioprocessing literature: cell-line specific productivity (Reinhart 2019), oxygen uptake rates (BioProcess International 2024), media costs (CHO media market 2025), bioreactor capex (Sustainability Atlas 2026, BioPlan 2025), metabolic constraints (Khattak 2010, Lao & Toth 1997).
 """),
     ("md", "## Imports"),
     ("code", """import math
@@ -2727,6 +2727,736 @@ The framework's contribution is making each of these conclusions inspectable. Ev
 ]
 
 
+NB_18 = [
+    ("md", """# 18. Metabolic architecture switching across carbon sources (temporal Case 1)
+
+This is the first *temporal* example: a system whose best architecture changes over time because the environment changes. An organism alternates between two metabolic architectures as its carbon source changes. When glucose is abundant it runs a glycolytic, fast-growth network; when only acetate is available it must switch to a gluconeogenic architecture (the glyoxylate shunt) that is slower and biochemically costlier to operate. Switching is not free: re-acclimation means expressing a different enzyme complement, the lag phase of the classic diauxic shift.
+
+The question is not "which architecture is best" but "what is the schedule of architectures across a changing environment, given that switching costs something". That is a small dynamic program over the discrete choice of architecture per epoch, solved here by `solve_schedule` (an exact Viterbi pass over the epoch/architecture lattice).
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'metabolic', os.path.join(PROJECT_ROOT, 'examples', '18_metabolic_switching.py'))
+ex18 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ex18)
+
+from codesign import solve_schedule
+print("Module loaded.")
+print("Architectures:", ex18.GLYCOLYTIC.name, "and", ex18.GLUCONEOGENIC.name)
+"""),
+    ("md", """## The two architectures
+
+Each metabolic architecture is a small co-design problem: given a demanded biomass growth rate `mu` (the outer functionality of the epoch), it returns a scalar `burden`, a proxy for the proteomic and ATP cost of sustaining that growth on that substrate. The glycolytic architecture is cheap per unit growth but capped at a moderate growth ceiling; the gluconeogenic one is costlier per unit and carries a fixed shunt overhead, but reaches a higher ceiling.
+
+We first solve each architecture directly across a sweep of demanded growth rates to see the burden curves that drive the scheduling decision.
+"""),
+    ("code", """from codesign import solve, minimize_cost
+import numpy as np
+
+mus = np.linspace(0.1, 1.15, 40)
+burden_glyc, burden_gluco = [], []
+for mu in mus:
+    for arch, store in ((ex18.GLYCOLYTIC, burden_glyc),
+                        (ex18.GLUCONEOGENIC, burden_gluco)):
+        res = solve(arch.dp, {"mu": float(mu)})
+        if res.feasible:
+            pt = minimize_cost(res, ex18.burden_cost)
+            store.append(ex18.burden_cost(pt) if pt else np.nan)
+        else:
+            store.append(np.nan)
+print("glycolytic feasible up to mu =",
+      f"{max(m for m,b in zip(mus,burden_glyc) if not np.isnan(b)):.2f}")
+print("gluconeogenic feasible up to mu =",
+      f"{max(m for m,b in zip(mus,burden_gluco) if not np.isnan(b)):.2f}")
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+# MATLAB gem colours.
+BLUE   = "#0072BD"
+ORANGE = "#D95319"
+
+fig, ax = plt.subplots(figsize=(7.5, 4.6))
+ax.plot(mus, burden_glyc, color=BLUE, lw=3.0, label="glycolytic (glucose)")
+ax.plot(mus, burden_gluco, color=ORANGE, lw=3.0, label="gluconeogenic (acetate)")
+ax.set_xlabel("demanded growth rate  mu  (1/h)", fontsize=12)
+ax.set_ylabel("metabolic burden", fontsize=12)
+ax.set_title("Burden curves of the two metabolic architectures", fontsize=13)
+ax.legend(fontsize=11, frameon=True, loc="upper left")
+ax.grid(True, alpha=0.3, linewidth=0.8)
+ax.tick_params(labelsize=11)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """The glycolytic curve (blue) is lower and cheaper but stops at its growth ceiling; the gluconeogenic curve (orange) continues to higher growth rates but sits above glycolytic everywhere they overlap, and it is offset upward by the fixed shunt overhead. Where both are feasible, glycolytic is cheaper to run. The scheduling tension is therefore entirely about *switching*: is it worth switching into the cheaper pathway for a short window if that costs two re-acclimations?
+"""),
+    ("md", """## The environment and the schedule
+
+The environment is a sequence of epochs that alternate substrate and demand. Only the architecture matching the available substrate is admissible per epoch, except a deliberately contested `mixed` epoch (both substrates present) that is *flanked by acetate on both sides*. Choosing the locally cheaper glycolytic pathway for that single mixed epoch therefore forces two extra switches (acetate to glucose-type and back), whereas riding it out on the incumbent gluconeogenic pathway costs none.
+
+We solve the schedule twice: once with a low re-acclimation cost, once with a high one.
+"""),
+    ("code", """epochs = ex18.build_environment()
+print("Environment:")
+for ep in epochs:
+    subs = "/".join(sorted({c.tags["substrate"] for c in ep.candidates}))
+    print(f"  {ep.name:<10s} mu={ep.functionality['mu']:.2f}  [{subs}]")
+
+sched_lo = solve_schedule(epochs, cost_fn=ex18.burden_cost, switch_cost=0.05)
+sched_hi = solve_schedule(epochs, cost_fn=ex18.burden_cost, switch_cost=0.8)
+
+print("\\nLow switch cost (0.05):  ", " -> ".join(sched_lo.schedule),
+      f"  ({sched_lo.n_switches} switches)")
+print("High switch cost (0.8):  ", " -> ".join(sched_hi.schedule),
+      f"  ({sched_hi.n_switches} switches)")
+"""),
+    ("code", """# Visualise the two schedules as coloured tracks across epochs.
+fig, axes = plt.subplots(2, 1, figsize=(8.5, 4.4), sharex=True)
+names = [ep.name for ep in epochs]
+xs = range(len(epochs))
+
+def plot_track(ax, sched, title):
+    for i, er in enumerate(sched.epochs):
+        c = BLUE if er.architecture == "glycolytic" else ORANGE
+        ax.barh(0, 1, left=i, height=0.6, color=c, edgecolor="white", linewidth=1.5)
+        ax.text(i + 0.5, 0, er.architecture[:5], ha="center", va="center",
+                color="white", fontsize=10, fontweight="bold")
+        if er.switch_cost:
+            ax.plot(i, 0.42, marker="v", color="black", markersize=9)
+    ax.set_yticks([])
+    ax.set_xlim(0, len(epochs))
+    ax.set_title(title, fontsize=12, loc="left")
+
+plot_track(axes[0], sched_lo,
+           f"Low re-acclimation cost: {sched_lo.n_switches} switches "
+           f"(total burden {sched_lo.total_cost:.2f})")
+plot_track(axes[1], sched_hi,
+           f"High re-acclimation cost: {sched_hi.n_switches} switches "
+           f"(total burden {sched_hi.total_cost:.2f})")
+axes[1].set_xticks([i + 0.5 for i in xs])
+axes[1].set_xticklabels(names, fontsize=10)
+from matplotlib.patches import Patch
+axes[0].legend(handles=[Patch(color=BLUE, label="glycolytic"),
+                        Patch(color=ORANGE, label="gluconeogenic"),
+                        plt.Line2D([], [], marker="v", color="black",
+                                   linestyle="none", label="switch")],
+               loc="upper right", fontsize=9, ncol=3, frameon=True)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## What the schedule reveals
+
+The `mixed` epoch is the whole story. Under a low re-acclimation cost the organism switches into the cheaper glycolytic pathway for that epoch and pays for two extra switches (the black markers), because the per-epoch burden saving outweighs the switching cost. Under a high re-acclimation cost the same epoch is served by the incumbent gluconeogenic pathway: two switches now cost more than the burden they would save, so the organism rides it out.
+
+This is the diauxic-shift intuition made quantitative. The optimal metabolic schedule is not a property of the environment alone; it depends on the *economics of switching*. The framework surfaces the flip point directly: identical environment, different switching cost, qualitatively different metabolic program. The same `solve_schedule` primitive that handles this organism would handle a vehicle reconfiguring between drivetrain modes or a sensor network swapping topology between survey and tracking phases.
+"""),
+]
+
+
+NB_19 = [
+    ("md", """# 19. Planetary rover module activation over a battery budget (temporal Case 2)
+
+This example addresses the question "robots with modules that switch on and off depending on context", solved as a genuine dynamic program with a resource carried between stages. A small planetary rover carries modules that can be independently activated: a drive train, a science payload, a high-gain comms link, and a survival heater. Each mission phase demands a capability, and the rover runs on a battery that depletes when modules draw power and partially recharges from solar input between phases.
+
+The outer object is a finite-horizon DP over mission phases; the per-phase decision is which module configuration (which "mode") to activate; the per-phase cost is obtained by *solving a co-design problem* that sizes the power bus and accumulates the mode's energy and objective cost; and the battery state of charge is the carried state linking phases. The framing follows standard spacecraft power-mode practice, where the power budget is organised into operational modes entered during different mission phases, and activities are scheduled around available battery reserve.
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'rover', os.path.join(PROJECT_ROOT, 'examples', '19_rover_modules.py'))
+ex19 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ex19)
+
+from codesign import solve_dynamic, rollout
+print("Modes:", ", ".join(a.name for a in ex19.ALL_MODES))
+print(f"Battery capacity {ex19.BATTERY_CAPACITY_WH:.0f} Wh, "
+      f"solar recharge {ex19.SOLAR_RECHARGE_WH:.0f} Wh/phase")
+"""),
+    ("md", """## The four modes, as an energy/value trade
+
+Each mode is a co-design problem that, given the phase's capability demand, sizes a power bus and returns the energy drawn (subtracted from the battery) and a cost. The cost is *energy spent plus an opportunity penalty* for objective value not delivered, kept non-negative because the co-design resource poset forbids negative resources. High-value modes carry a low penalty and are preferred when charge allows.
+"""),
+    ("code", """from codesign import solve, minimize_cost
+rows = []
+for arch in ex19.ALL_MODES:
+    res = solve(arch.dp, {"cap": 5.0})
+    pt = minimize_cost(res, ex19.mission_cost) if res.feasible else None
+    if pt:
+        rows.append((arch.name, pt["energy_Wh"], pt["cost"]))
+print(f"{'mode':<9} {'energy_Wh':>10} {'cost':>8}")
+for name, e, c in rows:
+    print(f"{name:<9} {e:>10.1f} {c:>8.1f}")
+"""),
+    ("md", """## Solve the policy and roll out from full and depleted batteries
+
+`solve_dynamic` runs the backward Bellman pass over the (phase, state-of-charge) lattice and returns a full state-indexed policy, valid for any starting charge. We roll it out from a full battery and from a nearly-empty one.
+"""),
+    ("code", """stages = ex19.build_mission(n_phases=6)
+grid = ex19.StateGrid.linspace(0.0, ex19.BATTERY_CAPACITY_WH, 61)
+policy = solve_dynamic(stages, grid, cost_fn=ex19.mission_cost,
+                       terminal_cost=ex19.terminal_reward)
+
+full = rollout(policy, stages, ex19.BATTERY_CAPACITY_WH)
+low  = rollout(policy, stages, 90.0)
+
+for label, res in (("full 300 Wh", full), ("low 90 Wh", low)):
+    print(f"\\n{label}: {' -> '.join(res.schedule)}  (cost {res.total_cost:.1f})")
+    for sr in res.stages:
+        print(f"   {sr.stage:<8s} {sr.architecture:<9s} "
+              f"soc {sr.state_in:6.1f} -> {sr.state_out:6.1f} Wh")
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+# MATLAB gem colours, one per mode.
+MODE_COLOR = {"drive": "#0072BD", "science": "#D95319",
+              "comms": "#EDB120", "survival": "#7E2F8E"}
+
+fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+
+def plot_run(ax, res, title):
+    trace_x, trace_y = [], []
+    for i, s in enumerate(res.stages):
+        trace_x += [i, i + 1]
+        trace_y += [s.state_in, s.state_out]
+    ax.plot(trace_x, trace_y, color="0.25", lw=3.0, zorder=3,
+            label="state of charge")
+    for i, s in enumerate(res.stages):
+        ax.axvspan(i, i + 1, color=MODE_COLOR.get(s.architecture, "0.6"),
+                   alpha=0.30, zorder=1)
+        ax.text(i + 0.5, ex19.BATTERY_CAPACITY_WH * 0.92, s.architecture,
+                ha="center", va="top", fontsize=9,
+                color=MODE_COLOR.get(s.architecture, "0.3"), fontweight="bold")
+    ax.set_ylim(0, ex19.BATTERY_CAPACITY_WH * 1.02)
+    ax.set_ylabel("battery (Wh)", fontsize=11)
+    ax.set_title(title, fontsize=12, loc="left")
+    ax.grid(True, axis="y", alpha=0.3, linewidth=0.8)
+
+plot_run(axes[0], full, "Start at full charge: science-heavy, then steps down")
+plot_run(axes[1], low, "Start depleted: forced onto lighter modes throughout")
+axes[1].set_xticks([i + 0.5 for i in range(len(full.stages))])
+axes[1].set_xticklabels([s.stage for s in full.stages], fontsize=10)
+from matplotlib.patches import Patch
+axes[0].legend(handles=[Patch(color=c, alpha=0.4, label=m)
+                        for m, c in MODE_COLOR.items()],
+               loc="lower left", fontsize=9, ncol=4, frameon=True)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## What the policy reveals
+
+The same policy produces two different module-activation schedules depending only on the starting charge. From a full battery the rover runs the high-value science mode until reserve falls, then steps down to a lighter mode as the battery approaches empty. Starting depleted, it can never afford science's large draw (which would take the battery negative), so it holds a lighter mode throughout and lets solar rebuild what it can.
+
+This is the load-shedding behaviour real power-constrained missions use, and it falls out of the framework without any special-casing: the co-design solve sizes each mode, the carried state of charge couples the phases, and the backward DP finds the schedule. The out-of-bounds guard in the solver is what makes it correct, a mode whose draw would take the battery below zero is rejected before the grid snaps the state back into range, so the rover never plans a schedule it cannot energetically execute.
+"""),
+]
+
+
+NB_20 = [
+    ("md", """# 20. Antichain-valued sequential co-design (multi-objective DP)
+
+The rover example (19) carried a battery budget and minimised a single scalar cost per phase, so its value function was one number per state. This notebook exercises the *antichain-valued* generalisation, the full sequential co-design object: the value at each stage and state is a whole Pareto front of cumulative resource totals, not a scalar, and the Bellman `min` becomes an antichain union-and-minimise.
+
+The scenario is a multi-leg survey. At each leg the operator picks a mode that trades two incommensurable objectives, monetary cost and CO2, against each other, while drawing down a shared energy budget carried between legs. Because cost and CO2 are incomparable, the answer to "how should the whole mission be run" is not one plan but a Pareto front of whole-mission (cost, CO2) totals, each realised by a different schedule of per-leg modes. The antichain-valued DP computes that front exactly.
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'seqcd', os.path.join(PROJECT_ROOT, 'examples', '20_sequential_codesign.py'))
+ex20 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ex20)
+
+from codesign import solve_sequential, sum_combine, check_monotonicity
+print("Modes:", ", ".join(m.name for m in ex20.MODES))
+"""),
+    ("md", """## The modes
+
+Three incomparable modes per leg span the cost/CO2 trade: `eco` (low CO2, high cost), `balanced` (middle), and `rapid` (low cost, high CO2). Each draws a different amount from the shared energy budget. The Pareto structure comes from the union over these incomparable modes and from accumulating incomparable totals across legs.
+"""),
+    ("code", """print(f"{'mode':<9} {'cost':>5} {'co2':>5} {'energy':>7}")
+for m, spec in (("eco",(10,1,4)),("balanced",(6,4,5)),("rapid",(2,9,7))):
+    print(f"{m:<9} {spec[0]:>5} {spec[1]:>5} {spec[2]:>7}")
+"""),
+    ("md", """## Solve the antichain-valued DP
+
+`solve_sequential` carries the scalar energy state (read by the transition) while accumulating the named cost axes `cost` and `co2` on the antichain. We use `sum_combine` because both objectives accumulate additively across legs.
+"""),
+    ("code", """n_legs = 4
+stages = ex20.build_mission(n_legs)
+grid = ex20.StateGrid.linspace(0.0, ex20.ENERGY_CAPACITY, 61)
+
+res = solve_sequential(stages, grid, cost_axes=["cost", "co2"],
+                       initial_state=ex20.ENERGY_CAPACITY, combine=sum_combine)
+
+front = sorted(((p["cost"], p["co2"]) for p in res.value), key=lambda t: t[0])
+print(f"Whole-mission Pareto front: {res.width} incomparable (cost, CO2) totals")
+for c, e in front:
+    print(f"   cost={c:6.1f}   co2={e:6.1f}")
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+BLUE = "#0072BD"
+xs = [c for c, e in front]
+ys = [e for c, e in front]
+
+fig, ax = plt.subplots(figsize=(7.2, 5.0))
+ax.step(xs, ys, where="post", color=BLUE, lw=2.5, alpha=0.6, zorder=1)
+ax.plot(xs, ys, "o", color=BLUE, markersize=10, zorder=3,
+        markeredgecolor="white", markeredgewidth=1.2)
+ax.annotate("all rapid\\n(cheap, dirty)", xy=(xs[0], ys[0]),
+            xytext=(xs[0] + 4, ys[0] - 3), fontsize=10,
+            arrowprops=dict(arrowstyle="->", color="0.4"))
+ax.annotate("all eco\\n(clean, costly)", xy=(xs[-1], ys[-1]),
+            xytext=(xs[-1] - 13, ys[-1] + 2), fontsize=10,
+            arrowprops=dict(arrowstyle="->", color="0.4"))
+ax.set_xlabel("total mission cost", fontsize=12)
+ax.set_ylabel("total mission CO2", fontsize=12)
+ax.set_title(f"Whole-mission Pareto front ({res.width} plans), {n_legs} legs",
+             fontsize=13)
+ax.grid(True, alpha=0.3, linewidth=0.8)
+ax.tick_params(labelsize=11)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## The front grows polynomially, not exponentially
+
+A worry with antichain-valued DP is that the value front blows up with the horizon. The theory says the front size equals the width of the *reachable frontier*, and for a summed objective on a fixed number of axes it grows polynomially in the horizon. We verify this by sweeping the number of legs and plotting the front width against the raw plan count.
+"""),
+    ("code", """widths = []
+legs_range = list(range(1, 9))
+for nl in legs_range:
+    st = ex20.build_mission(nl)
+    g = ex20.StateGrid.linspace(0.0, ex20.ENERGY_CAPACITY, 61)
+    r = solve_sequential(st, g, cost_axes=["cost", "co2"],
+                         initial_state=ex20.ENERGY_CAPACITY, combine=sum_combine)
+    widths.append(r.width)
+
+ORANGE = "#D95319"
+fig, ax = plt.subplots(figsize=(7.0, 4.4))
+ax.plot(legs_range, widths, "-o", color=ORANGE, lw=3.0, markersize=9,
+        markeredgecolor="white", markeredgewidth=1.2, label="Pareto front width")
+ax.plot(legs_range, [2 ** n for n in legs_range], "--", color="0.5", lw=2.0,
+        label="raw plan count (2^legs)")
+ax.set_xlabel("number of legs", fontsize=12)
+ax.set_ylabel("count", fontsize=12)
+ax.set_title("Front width grows polynomially, not exponentially", fontsize=13)
+ax.set_yscale("log")
+ax.legend(fontsize=11, frameon=True, loc="upper left")
+ax.grid(True, alpha=0.3, linewidth=0.8, which="both")
+ax.tick_params(labelsize=11)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## The monotonicity guard
+
+The theory gives two conditions, (H1) and (H2), under which the value front is monotone in the carried state: more energy never shrinks the achievable front. `check_monotonicity` verifies them numerically on the state grid, distinguishing genuinely non-monotone (perishable) stages from the benign consumable-but-monotone case.
+"""),
+    ("code", """rep = check_monotonicity(stages, grid, cost_axes=["cost", "co2"])
+print(rep)
+print("Value front monotone in carried budget:", rep.monotone_value_guaranteed)
+"""),
+    ("md", """## What the antichain-valued DP delivers
+
+The output is a single object, the whole-mission Pareto front, that a single-objective DP cannot produce: incomparable plans from all-rapid (cheapest, dirtiest) to all-eco (cleanest, costliest), with interior points mixing modes across legs. Every point is on the exact reachable frontier: achievable by some feasible mode sequence, and no achievable non-dominated total is missed.
+
+Two structural facts make this practical rather than a combinatorial explosion. The front width grows polynomially in the horizon (linearly here) rather than as the raw plan count, because cost and CO2 accumulate on two fixed axes. And the value is monotone in the carried budget when (H1) and (H2) hold, which the guard confirms. This is the general sequential co-design object; the scalar rover DP of notebook 19 is its width-one special case.
+"""),
+]
+
+
+NB_21 = [
+    ("md", """# 21. Vector-state co-design for a self-reconfiguring robot
+
+Examples 19 and 20 carried a single scalar between stages (a battery charge). Real reconfigurable systems carry a *state vector*. The Formula 1 seasonal co-design of Neumann, Zardini and colleagues carries two battery wear levels plus a regulatory flag; a self-reconfiguring modular robot on a multi-leg mission carries the accumulated wear of each drive module it can activate, plus a shared energy budget.
+
+This notebook is the robot case, and it exercises the general **vector-state dynamic program**. A field robot reconfigures between three morphologies at each mission leg, drawing on two physical drive modules whose wear accumulates independently:
+
+- **tracked**: uses the track module heavily. Low energy, high track wear.
+- **wheeled**: uses the wheel module. Higher energy, low ops cost, high wheel wear.
+- **hybrid**: splits load across both modules, wearing each a little.
+
+The carried state is a vector of three axes (`track_wear`, `wheel_wear`, `energy`), and the optimal plan spreads wear across the two modules so neither hits its limit and forces an expensive fallback.
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'recon', os.path.join(PROJECT_ROOT, 'examples', '21_reconfigurable_robot.py'))
+ex21 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ex21)
+
+from codesign import solve_vector_sequential, check_vector_monotonicity, sum_combine
+print("Morphologies:", ", ".join(m.name for m in ex21.MORPHOLOGIES))
+print(f"energy capacity {ex21.ENERGY_CAPACITY:.0f} (+{ex21.SOLAR_RECHARGE:.0f}/leg), "
+      f"wear limit {ex21.WEAR_LIMIT:.0f} per module")
+"""),
+    ("md", """## The morphologies, as an energy / ops / wear trade
+
+Each morphology is a co-design problem returning the energy it draws, an operations-cost proxy, and the wear it applies to each module. Tracked and wheeled are deliberately *cost-incomparable* (tracked is cheaper on energy, wheeled on operations), so the mission has a genuine Pareto front rather than a single dominant plan.
+"""),
+    ("code", """print(f"{'morphology':<10} {'energy':>6} {'ops':>4} {'d_track':>8} {'d_wheel':>8}")
+for m, spec in (("tracked",(2,4,3,0)),("wheeled",(4,2,0,3)),("hybrid",(3,3,1.5,1.5))):
+    print(f"{m:<10} {spec[0]:>6} {spec[1]:>4} {spec[2]:>8} {spec[3]:>8}")
+"""),
+    ("md", """## Solve the vector-state DP
+
+`solve_vector_sequential` carries the full three-axis state vector on a `VectorStateGrid` (a product of three continuous axes), accumulating (energy, ops) on the antichain while the transition advances the wear and energy axes.
+"""),
+    ("code", """n_legs = 5
+stages = ex21.build_mission(n_legs)
+grid = ex21.VectorStateGrid([
+    ex21.ContinuousAxis('track_wear', 0.0, ex21.WEAR_LIMIT, 11),
+    ex21.ContinuousAxis('wheel_wear', 0.0, ex21.WEAR_LIMIT, 11),
+    ex21.ContinuousAxis('energy', 0.0, ex21.ENERGY_CAPACITY, 13),
+])
+print(f"grid size: {len(grid)} state nodes")
+
+res = solve_vector_sequential(
+    stages, grid, cost_axes=['energy', 'ops'],
+    initial_state={'track_wear': 0.0, 'wheel_wear': 0.0, 'energy': ex21.ENERGY_CAPACITY},
+    combine=sum_combine)
+
+front = sorted(((p['energy'], p['ops']) for p in res.value), key=lambda t: t[0])
+print(f"\\nMission Pareto front ({res.width} incomparable (energy, ops) totals):")
+for e, o in front:
+    print(f"   energy={e:6.1f}   ops={o:6.1f}")
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+BLUE = "#0072BD"
+xs = [e for e, o in front]
+ys = [o for e, o in front]
+
+fig, ax = plt.subplots(figsize=(7.2, 5.0))
+ax.step(xs, ys, where="post", color=BLUE, lw=2.5, alpha=0.6, zorder=1)
+ax.plot(xs, ys, "o", color=BLUE, markersize=11, zorder=3,
+        markeredgecolor="white", markeredgewidth=1.4)
+ax.set_xlabel("total mission energy", fontsize=12)
+ax.set_ylabel("total mission ops cost", fontsize=12)
+ax.set_title(f"Reconfigurable-robot Pareto front ({res.width} plans), {n_legs} legs",
+             fontsize=13)
+ax.grid(True, alpha=0.3, linewidth=0.8)
+ax.tick_params(labelsize=11)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## The three-axis carried state
+
+The key point is that a scalar DP could not represent this problem: the value is parametrised by a *vector* of two wear levels plus energy. Below we confirm the monotonicity guard passes over the product order, so more spare wear budget and more energy never shrink the achievable front.
+"""),
+    ("code", """rep = check_vector_monotonicity(stages, grid, cost_axes=['energy', 'ops'])
+print(rep)
+print("value front monotone in the carried state vector:", rep.monotone_value_guaranteed)
+"""),
+    ("md", """## What the vector-state DP delivers
+
+Each point on the front is a different morphology schedule across the five legs. The low-energy end leans on tracked (cheap energy), the low-ops end on wheeled (cheap operations), and the interior mixes so that neither module's wear reaches its limit. Reaching the fifth leg on a single morphology is infeasible (five wheeled legs would wear the wheel module past its limit), so the DP is forced to spread load, exactly the maintenance-aware behaviour an operator wants.
+
+This is the structured multi-component state that the Formula 1 seasonal co-design carries (there: two batteries plus a regulatory flag; here: two drive modules plus energy). The single-axis case reduces to the scalar sequential DP of notebook 20, so the vector layer strictly generalises it.
+"""),
+]
+
+
+NB_22 = [
+    ("md", """# 22. Online feedback co-design of an adaptive sensor node
+
+Every temporal example so far plans offline: the whole horizon is solved in advance and a policy is read out. This notebook closes the loop. A solar-powered environmental sensor node runs in the field, and at each control step it senses its current battery charge, reads the current data requirement and solar conditions, re-solves its co-design at those live conditions, applies the cheapest feasible configuration, and repeats.
+
+The plan is never trusted to match reality: the next configuration is chosen from the *measured* state, so when conditions diverge from any forecast the loop simply re-solves against what actually happened. That is feedback, not open-loop replay. This is the co-design instance of **control co-design (CCD)** in its nested, receding-horizon form, here the myopic variant (re-solve a single static co-design at the current conditions each step).
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'onlinecd', os.path.join(PROJECT_ROOT, 'examples', '22_online_feedback_codesign.py'))
+ex22 = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ex22)
+
+from codesign import run_online_codesign
+print("Configs:", ", ".join(c.name for c in ex22.CONFIGS))
+print(f"battery capacity {ex22.BATTERY_CAPACITY:.0f}, horizon {ex22.N_STEPS} steps")
+"""),
+    ("md", """## The scenario
+
+The node runs in three sensing configurations (low_power, nominal, high_rate), each a co-design problem that sizes the radio and compute against the demanded data rate and is *gated by the measured charge* (a hungry configuration is infeasible when the battery is low, the feedback path). A storm raises the demanded data rate mid-run, and the solar recharge follows a day/storm/recovery profile.
+"""),
+    ("code", """print("step:   ", " ".join(f"{i:>3}" for i in range(ex22.N_STEPS)))
+print("demand: ", " ".join(f"{d:>3}" for d in ex22.DEMAND_RATE))
+print("solar:  ", " ".join(f"{s:>3}" for s in ex22.SOLAR))
+"""),
+    ("md", """## Run the closed loop
+
+At each step the loop senses the true battery charge (held by the plant), reads the live requirement (demand plus available charge) and environment (solar), re-solves the co-design, applies the cheapest feasible configuration, steps the true plant, and logs the outcome.
+"""),
+    ("code", """sensor, requirement, environment, plant = ex22.make_scenario()
+result = run_online_codesign(
+    ex22.CONFIGS, n_steps=ex22.N_STEPS, sensor=sensor, requirement=requirement,
+    environment=environment, plant=plant, cost_fn=ex22.cost_fn,
+    initial_state=ex22.BATTERY_CAPACITY)
+
+print(f"{'t':>2}  {'soc_in':>6}  {'rate':>4}  {'solar':>5}  {'config':<10} {'energy':>6}  {'ops':>4}")
+for s in result.steps:
+    e = s.point['energy'] if s.feasible else float('nan')
+    o = s.point['ops'] if s.feasible else float('nan')
+    cfg = s.architecture if s.feasible else 'INFEASIBLE'
+    print(f"{s.step:>2}  {s.measured_state:>6.1f}  {s.requirement['rate']:>4.0f}  "
+          f"{s.environment['solar']:>5.0f}  {cfg:<10} {e:>6.1f}  {o:>4.1f}")
+print(f"\\nschedule: {' -> '.join(result.schedule)}")
+print(f"total ops cost = {result.total_cost:.1f}, feasible = {result.feasible}")
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+# MATLAB gem colours, one per config.
+CFG_COLOR = {"low_power": "#0072BD", "nominal": "#D95319", "high_rate": "#7E2F8E"}
+
+steps = result.steps
+xs = list(range(len(steps)))
+soc = [s.measured_state for s in steps]
+demand = [s.requirement["rate"] for s in steps]
+
+fig, ax = plt.subplots(figsize=(9.5, 5.0))
+# Battery trace (thick).
+ax.plot(xs, soc, color="0.25", lw=3.0, marker="o", markersize=6,
+        zorder=4, label="battery charge")
+# Config bands.
+for s in steps:
+    c = CFG_COLOR.get(s.architecture, "0.6")
+    ax.axvspan(s.step - 0.5, s.step + 0.5, color=c, alpha=0.22, zorder=1)
+# Demand overlay on a twin axis.
+ax2 = ax.twinx()
+ax2.plot(xs, demand, color="#EDB120", lw=2.5, ls="--", marker="s",
+         markersize=5, zorder=3, label="data-rate demand")
+ax2.set_ylabel("data-rate demand", fontsize=12, color="#B8860B")
+ax2.tick_params(axis="y", labelcolor="#B8860B", labelsize=11)
+
+ax.set_xlabel("control step", fontsize=12)
+ax.set_ylabel("battery charge", fontsize=12)
+ax.set_title("Online feedback co-design: charge, demand, and chosen config",
+             fontsize=13)
+ax.set_ylim(0, ex22.BATTERY_CAPACITY * 1.05)
+ax.grid(True, axis="y", alpha=0.3, linewidth=0.8)
+ax.tick_params(labelsize=11)
+
+from matplotlib.patches import Patch
+handles = [Patch(color=c, alpha=0.35, label=n) for n, c in CFG_COLOR.items()]
+handles.append(plt.Line2D([], [], color="0.25", lw=3.0, label="battery"))
+handles.append(plt.Line2D([], [], color="#EDB120", lw=2.5, ls="--", label="demand"))
+ax.legend(handles=handles, loc="lower center", fontsize=9, ncol=5, frameon=True)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## What the closed loop reveals
+
+The node escalates to `high_rate` during the storm (the demand spike) when the rate justifies it, then the closed loop reads the depleting charge and the re-solve is gated: `high_rate` becomes infeasible, so the node falls back through `nominal` to `low_power`, and climbs back as solar recovers. No offline plan is followed. Each step is solved against the measured battery state, so the schedule adapts to how the deployment actually unfolds.
+
+This is the myopic (option-a) form of online feedback co-design: re-solve a single static co-design at the live conditions each step. A receding-horizon lookahead that plans several steps ahead with the vector-state DP and commits only the first, and online learning of the co-design model from measurements, are the natural next increments; the model here is known, and measurements update the carried state and conditions rather than the model itself.
+"""),
+]
+
+
+NB_23 = [
+    ("md", """# 23. Hierarchical co-design for a Formula 1 season (precompute-then-DP)
+
+This notebook reproduces, in the framework's vocabulary, the seasonal co-design of Neumann, Habermacher, Fieni, Cerofolini, Zardini, and Onder, *"Hierarchical Co-Design for Multi-Race Strategy Optimization in Formula 1"* (ITSC 2026). It is the canonical **precompute-then-DP** structure that motivated the `precompute_catalog` / `dp_over_catalog` helpers.
+
+The idea is a clean separation into two layers:
+
+1. **Race-level co-design** (uses the MCDP framework). For each track, battery size, and *incoming battery age*, a `CatalogDP` over energy-deployment strategies emits a Pareto front of `(race_time, wear_increment)`: deploying more electrical energy lowers race time but ages the battery faster, and an aged pack deploys less effectively. This front is solved **once** and frozen.
+
+2. **Season-level dynamic program** (a scalar maximisation MDP). The state is a vector `(w1, w2, ex)`: the fractional wear of the two regulation-permitted battery units plus a flag recording whether a replacement penalty has been incurred. Each race the controls are which unit to run, which frozen implementation (deployment strategy) to pick, and whether to install a fresh unit (a grid penalty: 10 places for the first replacement, 5 for each later one). Race time maps to expected championship points through a time-gap and grid-penalty model integrated against the FIA points table. The DP maximises the season's total expected points.
+
+No co-design solve happens inside the season sweep, which is exactly what distinguishes precompute-then-DP from the re-solving `solve_sequential`.
+"""),
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'f1', os.path.join(PROJECT_ROOT, 'examples', '23_formula1_season.py'))
+f1 = importlib.util.module_from_spec(_spec)
+sys.modules['f1'] = f1   # register before exec so @dataclass(frozen=True) resolves
+_spec.loader.exec_module(f1)
+
+print("Season:", ", ".join(t.name for t in f1.SEASON))
+print("Batteries:", ", ".join(f"{k} ({v} MJ)" for k, v in f1.BATTERIES.items()))
+print(f"Wear limit {f1.WEAR_MAX:.0%}, deploy strategies {f1.DEPLOY_STRATEGIES}")
+print("FIA points P1..P10:", [f1.FIA_POINTS[p] for p in range(1, 11)])
+"""),
+    ("md", """## Layer 1: the race Pareto front (the paper's Fig. 1)
+
+Each deployment strategy is a `CatalogDP` entry emitting `(race_time, wear)`. `precompute_catalog` returns the Pareto front through a genuine MCDP solve. Faster race times cost more battery wear, so the whole set is non-dominated, the trade-off curve the season DP later selects along.
+"""),
+    ("code", """track = f1.SEASON[0]   # Monza
+front_new = f1.precompute_catalog(
+    [f1.Architecture('4MJ', f1.build_race_dp(track, 4.0, 0.0))],
+    {'participate': 0.0}, ['race_time', 'wear'])
+front_aged = f1.precompute_catalog(
+    [f1.Architecture('4MJ', f1.build_race_dp(track, 4.0, 0.20))],
+    {'participate': 0.0}, ['race_time', 'wear'])
+
+print(f"{track.name} / 4MJ Pareto front (new pack):")
+for _, p in sorted(front_new, key=lambda x: x[1]['race_time']):
+    print(f"   {f1._deploy_label(p['wear']):<12} time={p['race_time']:8.1f}s  wear={p['wear']:.3f}")
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+BLUE, ORANGE = "#0072BD", "#D95319"
+
+def front_xy(front):
+    pts = sorted((p for _, p in front), key=lambda p: p['wear'])
+    return [p['wear'] for p in pts], [p['race_time'] for p in pts]
+
+xn, yn = front_xy(front_new)
+xa, ya = front_xy(front_aged)
+
+fig, ax = plt.subplots(figsize=(7.6, 5.0))
+ax.plot(xn, yn, "-o", color=BLUE, lw=2.8, markersize=10, label="new pack (0% wear)",
+        markeredgecolor="white", markeredgewidth=1.3)
+ax.plot(xa, ya, "-s", color=ORANGE, lw=2.8, markersize=10, label="aged pack (20% wear)",
+        markeredgecolor="white", markeredgewidth=1.3)
+ax.set_xlabel("battery wear increment  $\\\\Delta w_b$", fontsize=12)
+ax.set_ylabel("race time (s)", fontsize=12)
+ax.set_title(f"Race co-design Pareto front, {track.name} / 4MJ", fontsize=13)
+ax.legend(fontsize=10, frameon=True)
+ax.grid(True, alpha=0.3, linewidth=0.8)
+ax.tick_params(labelsize=11)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """The aged pack sits above and to the left: with less usable energy it cannot reach the low race times a fresh pack can, no matter how hard it deploys. This is why incoming battery age is part of the DP state, and why the catalog is precomputed per age bucket.
+
+## Reproducing the paper's figures (same format, illustrative numbers)
+
+**Honest scope.** This section regenerates the paper's three key figures *in the same format*, so the framework's output can be compared side by side with the published ones. It does **not** reproduce the paper's numbers. The paper's fronts come from an optimal-control lap simulation and a battery-health degradation model that are not available here; the position model is fitted in the paper from a decade of FIA race data and the top-four constructors' results. What matches is the **structure**: the shape of the race-time-vs-wear Pareto fronts per (battery, age), the grid-position penalty curve with its saturation and track-difficulty ordering, and the finishing-position density. The numbers below are this example's stylised parameters. Treat this as proof that the framework produces the same *kind* of artefacts the paper reports, not as a numerical replication.
+
+### Fig. 1: race Pareto fronts per (battery, initial age)
+
+Race time on the x-axis (a tight band), wear increment in percent on the y-axis, one line per battery size and initial age (solid/dashed/dotted for 10/20/30% age), with the fastest point (node A, P1) and a representative trade-off (node B) highlighted, matching the paper's Fig. 1 layout.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+
+fra = f1.Track("Paul Ricard (FRA)", base_time=5060.0, overtake_difficulty=0.4)
+fig, ax = plt.subplots(figsize=(8.4, 5.6))
+f1.figure1_race_fronts(fra, ax=ax)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """The layout matches the paper's Fig. 1: two battery sizes, three initial-age curves each, race times clustered in a narrow band, wear on the vertical axis, and the highlighted fastest (A) and trade-off (B) nodes. The absolute time band and wear range differ from the paper (illustrative parameters), but the co-design produces exactly this family of nondominated fronts.
+
+### Fig. 2: grid-start position penalty $\\mu_{pos} \\pm \\sigma_{pos}$
+
+The mean grid-start penalty as a function of the starting slot, with a $\\pm\\sigma$ band, for two tracks. The penalty is zero at the reference slot P3, a bonus for front starts, and saturates beyond ~P12; a hard-to-overtake track (Monaco) sits above an easy one, reproducing the paper's CAN-vs-MON ordering.
+"""),
+    ("code", """can = f1.Track("Villeneuve (CAN)", base_time=5100.0, overtake_difficulty=0.35)
+mon = next(t for t in f1.SEASON if t.name == "Monaco")
+fig, ax = plt.subplots(figsize=(8.4, 5.2))
+f1.figure2_position_penalty([can, mon], ax=ax)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """This reproduces the paper's Fig. 2 structure: the zero-crossing at the reference offset, the negative (bonus) region for strong starts, the saturation for poor starts, and Monaco penalising a bad grid slot more than Villeneuve, which is the whole point of the track-difficulty scaling.
+
+### Fig. 3: finishing-position density $\\varphi(\\mathrm{Pos}_{\\mathrm{end}})$
+
+The density over finishing positions for the fastest implementation, for two starting slots (P3 and P6). A worse start shifts the distribution back, as in the paper's Fig. 3.
+"""),
+    ("code", """fig, ax = plt.subplots(figsize=(8.4, 5.2))
+f1.figure3_finishing_distribution(fra, grid_starts=(3, 6), ax=ax)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """The P3 curve peaks at P1 (consistent with the baseline offset) and the P6 curve shifts back, matching the paper's qualitative Fig. 3 behaviour. The exact shift is milder here because the stylised $\\mu_{pos}$ is smaller than the paper's fitted value.
+
+**Summary of the comparison.** All three figures reproduce the paper's *format and qualitative behaviour* from the framework's own co-design solves and position model. They are not a numerical match, and the notebook labels them as such. This is the honest sense in which the framework "does the same thing": it produces the same structured artefacts (Pareto fronts, penalty curves, finishing densities) that feed the same season-level dynamic program.
+
+## Precompute every race front, once
+"""),
+    ("code", """catalogs = f1.precompute_race_catalogs(f1.SEASON)
+print(f"{len(catalogs)} race fronts precomputed "
+      f"({len(f1.SEASON)} tracks x {len(f1.BATTERIES)} batteries x "
+      f"{len(f1.wear_buckets())} age buckets).")
+print("These are frozen; the season DP below performs no further co-design solve.")
+"""),
+    ("md", """## Layer 2: solve the season dynamic program
+
+Backward induction over the season, carrying the `(w1, w2, ex)` state and maximising total expected championship points.
+"""),
+    ("code", """result = f1.solve_season(f1.SEASON, catalogs)
+print(f"Optimal season expected points: {result.total_points:.1f}\\n")
+print(f"{'race':<12} {'unit':>4} {'batt':>5} {'deploy':>12} {'time':>8} "
+      f"{'repl':>5} {'grid':>4} {'E[pts]':>6}")
+for d in result.decisions:
+    print(f"{d.track:<12} {d.battery_unit:>4} {d.battery_name:>5} "
+          f"{d.deploy_name:>12} {d.race_time:>8.1f} "
+          f"{'yes' if d.replaced else 'no':>5} {d.grid_start:>4} {d.exp_points:>6.1f}")
+"""),
+    ("code", """import numpy as np
+
+races = [d.track for d in result.decisions]
+pts = [d.exp_points for d in result.decisions]
+repl = [d.replaced for d in result.decisions]
+colors = [ORANGE if r else BLUE for r in repl]
+
+fig, ax = plt.subplots(figsize=(9.5, 5.0))
+bars = ax.bar(range(len(races)), pts, color=colors, edgecolor="white", linewidth=1.2)
+ax.set_xticks(range(len(races)))
+ax.set_xticklabels(races, rotation=30, ha="right", fontsize=10)
+ax.set_ylabel("expected championship points", fontsize=12)
+ax.set_title(f"Optimal season policy, {result.total_points:.1f} points total", fontsize=13)
+ax.grid(True, axis="y", alpha=0.3, linewidth=0.8)
+ax.tick_params(labelsize=11)
+
+from matplotlib.patches import Patch
+ax.legend(handles=[Patch(color=BLUE, label="race (no replacement)"),
+                   Patch(color=ORANGE, label="battery replacement (grid penalty)")],
+          fontsize=10, frameon=True)
+fig.tight_layout()
+plt.show()
+"""),
+    ("md", """## Finding 1: a local penalty for a global gain
+
+The optimal policy takes a battery replacement at one race, accepting a grid penalty (and a low points haul that day, the orange bar) to keep a fresh, low-wear pack available for aggressive deployment across the remaining races. Sacrificing points locally raises the season total, the multi-race coupling the paper highlights.
+"""),
+    ("code", """n_repl = sum(1 for d in result.decisions if d.replaced)
+repl_races = [d.track for d in result.decisions if d.replaced]
+print(f"replacements: {n_repl} at {repl_races}")
+print(f"season total: {result.total_points:.1f} expected points")
+"""),
+    ("md", """## Finding 2: race order shifts the optimal policy
+
+The paper reports that race order does not change the attainable total reward but does change the optimal control policy. In this stylised model the grid-penalty cost is track-dependent (a replacement hurts far more at a hard-to-overtake track like Monaco than at Monza), so reordering the calendar lets the optimiser place the replacement on a cheaper track. The total is therefore *near*-invariant, and the policy adapts to the order, the temporal coupling of the multi-stage decision.
+"""),
+    ("code", """reversed_season = list(reversed(f1.SEASON))
+rev_catalogs = f1.precompute_race_catalogs(reversed_season)
+rev_result = f1.solve_season(reversed_season, rev_catalogs)
+
+print(f"forward season total  = {result.total_points:.1f}")
+print(f"reversed season total = {rev_result.total_points:.1f}  (near-invariant)")
+print(f"forward replaces at  {[d.track for d in result.decisions if d.replaced] or 'never'}")
+print(f"reversed replaces at {[d.track for d in rev_result.decisions if d.replaced] or 'never'}")
+print("\\nThe optimal replacement moves to a cheaper-penalty track under reordering,")
+print("illustrating the temporal coupling the paper emphasises.")
+"""),
+    ("md", """## Correctness
+
+The season DP is validated against exhaustive brute-force enumeration on small instances in `tests/test_formula1.py` (the DP's optimal value matches the brute-force optimum exactly, for both single- and mixed-battery unit configurations). The race co-design fronts are genuine MCDP solves, aged packs deploy less, and the catalogs are correctly indexed by incoming battery age. This is the precompute-then-DP structure of the F1 paper, with the co-design layer supplied by the framework and the season MDP written out as a scalar-maximisation backward induction.
+"""),
+]
+
+
 def main():
     plan = [
         ("01_drone.ipynb", NB_01),
@@ -2746,6 +3476,12 @@ def main():
         ("15_bioprocess.ipynb", NB_15),
         ("16_online_doe.ipynb", NB_16),
         ("17_car_codesign.ipynb", NB_17),
+        ("18_metabolic_switching.ipynb", NB_18),
+        ("19_rover_modules.ipynb", NB_19),
+        ("20_sequential_codesign.ipynb", NB_20),
+        ("21_reconfigurable_robot.ipynb", NB_21),
+        ("22_online_feedback_codesign.ipynb", NB_22),
+        ("23_formula1_season.ipynb", NB_23),
     ]
     for name, cells in plan:
         write(name, cells)

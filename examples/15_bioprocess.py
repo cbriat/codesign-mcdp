@@ -34,7 +34,7 @@ Parameters are taken from the bioprocessing literature (2024-2026):
                          values are CHO-K1 7-16, CHO-S 2-6, CHO-DG44 2-4,
                          CHO-MK up to 19 pg/cell/day; the integrated
                          effective values used here are about 4x higher.
-                         (Reinhart et al. 2021; Sumi et al. 2024)
+                         (Reinhart et al. 2019)
     QO2 (CHO):           2-8e-10 mmol/cell/h
                          (BioProcess International 2024)
     kLa (mammalian):     1-25 h^-1 typical, kLa=1 supports about

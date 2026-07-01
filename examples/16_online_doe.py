@@ -57,16 +57,17 @@ Outputs (the antichain points)
 Sources cited (parameter calibrations)
 --------------------------------------
 
-- Yoon et al. (2003). Effect of culture temperature on antibody
-  production in NS0 cells. Biotechnol. Prog. 19: 1383-1386.
-- Sou et al. (2015). Mild temperature shift in CHO cell cultures.
-  BMC Biotechnology 15: 64.
-- Trummer et al. (2006). Process parameter shifting: pH and DO.
-  Biotechnol. Bioeng. 94: 1033-1044.
+- Yoon et al. (2003). Effect of low culture temperature on specific
+  productivity and transcription level of anti-4-1BB antibody in
+  recombinant CHO cells. Biotechnol. Prog. 19: 1383-1386.
+- Sou et al. (2015). How does mild hypothermia affect monoclonal
+  antibody glycosylation? Biotechnol. Bioeng. 112(6): 1165-1176.
+- Trummer et al. (2006). Process parameter shifting: Part I, DOT, pH,
+  and temperature. Biotechnol. Bioeng. 94(6): 1033-1044.
 - Khattak et al. (2010). Feed development for fed-batch CHO process
-  by semisteady state analysis. Biotechnol. Prog. 26: 1671-1682.
+  by semisteady state analysis. Biotechnol. Prog. 26(3): 797-804.
 - Gagnon et al. (2011). High-end pH-controlled delivery of glucose
-  (HIPDOG). Biotechnol. Bioeng. 108: 1328-1337.
+  (HIPDOG). Biotechnol. Bioeng. 108(6): 1328-1337.
 """
 from __future__ import annotations
 

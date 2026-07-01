@@ -8,6 +8,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Formula 1 seasonal co-design** (`examples/23_formula1_season.py`,
+  `tests/test_formula1.py`). A faithful reproduction of the hierarchical
+  co-design of Neumann, Zardini et al. (ITSC 2026) in the framework's
+  vocabulary, and the canonical precompute-then-DP structure. Layer 1
+  solves the race-level co-design once per (track, battery, incoming-age)
+  into a frozen Pareto catalog of `(race_time, wear)` via `CatalogDP` and
+  `precompute_catalog`; layer 2 is a season-level scalar-maximisation MDP
+  carrying the `(w1, w2, ex)` state and maximising expected championship
+  points against the FIA table, selecting per race which unit to run, which
+  deployment implementation, and whether to replace. Reproduces the paper's
+  local-penalty-for-global-gain and race-order-policy findings. The season
+  DP is validated against exhaustive brute force (single- and mixed-battery
+  instances) in `tests/test_formula1.py` (9 tests). The example and notebook
+  23 also regenerate the paper's three key figures in the same format (the
+  race Pareto fronts of Fig. 1, the grid-start penalty of Fig. 2, and the
+  finishing-position density of Fig. 3) for visual comparison, from the
+  framework's own co-design solves and position model, labelled as a
+  structural rather than numerical reproduction. Notebook 23 walks
+  through the race Pareto front, the paper-figure comparison, the season
+  solve, and both findings.
+- **Vector-state co-design** (`codesign/state.py`, `codesign/vector_dp.py`,
+  `examples/21_reconfigurable_robot.py`). Generalises the carried state from
+  a scalar to a full **state vector**. `VectorStateGrid` is a product grid
+  over `ContinuousAxis` and `DiscreteAxis` components; `solve_vector_sequential`
+  runs the antichain-valued DP carrying the vector, with the transition
+  returning a `{axis: value}` mapping. `check_vector_monotonicity` verifies
+  (H1)/(H2) over the component-wise product order. A one-axis grid reproduces
+  the scalar `sequential` result exactly (verified). New names: `StateVec`,
+  `make_state`, `state_get`, `state_as_dict`, `Axis`, `ContinuousAxis`,
+  `DiscreteAxis`, `VectorStateGrid`, `VecStage`, `VecResult`, `VecPolicy`,
+  `solve_vector_sequential`, `VectorMonotonicityReport`,
+  `check_vector_monotonicity`. Example 21 is a self-reconfiguring robot
+  carrying two per-module wear axes plus energy.
+- **Precompute-then-DP** (`precompute_catalog`, `dp_over_catalog` in
+  `codesign/sequential.py`). The structure of the Formula 1 seasonal
+  co-design framework (Neumann, Zardini et al.): solve the co-design once
+  into a frozen Pareto catalog, then run an outer DP that selects catalog
+  indices rather than re-solving inside the Bellman sweep. Agrees exactly
+  with `solve_sequential` when the co-design is state-independent (verified).
+- **Online feedback co-design** (`codesign/online_codesign.py`,
+  `examples/22_online_feedback_codesign.py`). A closed-loop, measurement-in-
+  the-loop controller: `run_online_codesign` senses the measured state,
+  reads the live requirement and environment, re-solves the co-design
+  (`resolve_at`), applies the cheapest feasible choice by stepping the true
+  plant, and logs a `ControlStep`. The myopic (option-a) variant of control
+  co-design; the plant is stepped with the true process so the loop is
+  genuine feedback. New names: `ControlStep`, `OnlineCoDesignResult`,
+  `resolve_at`, `run_online_codesign`. Example 22 is an adaptive sensor node.
+- Tests: `tests/test_vector_online.py` (11 tests) covering the vector grid
+  primitives, the vector DP and its scalar-equivalence, the precompute-then-DP
+  equivalence, and the online loop's feedback behaviour.
+
+### Fixed
+- **Correctness fix in the antichain-valued backward pass** (`sequential.py`
+  and `vector_dp.py`). The pass previously iterated the cost-Pareto-reduced
+  stage antichain before applying the carried-state transition, which could
+  discard a cost-dominated point that was the only feasible choice from a
+  constrained carried state (for example a higher-cost morphology that spares
+  a worn module). The pass now enumerates all solved points and lets
+  `union_min` prune only *after* the transition. `detect_resets` similarly now
+  checks all points. Existing examples and tests are unaffected (their
+  cost-dominated points had identical successors); the reconfigurable-robot
+  example is feasible only with the fix.
+
+- **Antichain-valued sequential co-design** (`codesign/sequential.py`,
+  `examples/20_sequential_codesign.py`, `tests/test_sequential.py`). The
+  multi-objective generalisation of the scalar `dynamic` layer: the value
+  at each (stage, state) is a Pareto antichain of cumulative resource
+  totals and the Bellman `min` is `Antichain.union_min`. Public names:
+  `SeqStage`, `SeqResult`, `SeqPolicy`, `solve_sequential`, `sum_combine`,
+  `join_combine`, `MonotonicityReport`, `check_monotonicity`,
+  `detect_resets`, `factorise_at_resets`. The carried scalar state (read by
+  the transition) is kept distinct from the accumulated cost axes (on the
+  antichain). Three theory results are operational: the value front equals
+  the reachable frontier; `check_monotonicity` verifies the (H1)/(H2)
+  conditions for a monotone value and flags genuinely non-monotone
+  (perishable) stages while accepting the benign consumable-but-monotone
+  orientation; and `detect_resets`/`factorise_at_resets` expose exact
+  horizon factorisation at quiescent points. `sum_combine` gives a
+  consumable resource (front polynomial in the horizon), `join_combine` a
+  renewable one (front bounded). The scalar `dynamic` layer is the
+  width-one reduction. Example 20 computes the whole-mission (cost, CO2)
+  Pareto front of a multi-leg survey under a shared energy budget.
+
+- **Time-evolving co-design: two new modules and two examples.**
+  - `codesign/temporal.py` (Case 1, *switching*): `solve_schedule()`
+    chooses the best architecture per environment epoch via an exact
+    Viterbi pass over the epoch/architecture lattice, with switching cost
+    (uniform or per-transition callable) and hysteresis. Public names:
+    `Architecture`, `Epoch`, `EpochResult`, `ScheduleResult`,
+    `solve_schedule`.
+  - `codesign/dynamic.py` (Case 2, *dynamically changing architecture by
+    DP*): a finite-horizon backward DP whose per-stage decision is which
+    architecture to instantiate, whose per-stage cost is a co-design
+    `solve()`, and which carries a scalar resource (fuel/charge/wear)
+    between stages via a `transition`. Returns a state-indexed
+    `DynamicPolicy` queryable in closed loop. Public names: `Stage`,
+    `StageResult`, `DynamicResult`, `StateGrid`, `DynamicPolicy`,
+    `solve_dynamic`, `rollout`, `solve_and_rollout`. A carried resource
+    that crosses the grid envelope is rejected before snapping, so
+    overspending a depleting resource is never masked by rounding back
+    into range.
+  - **Example 18** (`examples/18_metabolic_switching.py`): metabolic
+    architecture switching across carbon sources (glycolytic vs
+    gluconeogenic) with a re-acclimation cost; the optimal schedule at a
+    contested mixed-substrate epoch flips with switching economics.
+  - **Example 19** (`examples/19_rover_modules.py`): a planetary rover
+    activating and deactivating modules (drive, science, comms, survival)
+    across mission phases on a depleting/recharging battery, solved as a
+    finite-horizon architecture DP that carries state of charge.
+  - Tests: `tests/test_temporal_dynamic.py` (8 tests, numpy-free),
+    including a regression for the grid-snap masking hazard.
+
 - **Example 17: full-vehicle co-design across ICE, hybrid, and EV
   architectures** (`examples/17_car_codesign.py`,
   `notebooks/17_car_codesign.ipynb`,

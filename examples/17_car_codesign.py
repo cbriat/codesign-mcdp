@@ -71,9 +71,9 @@ Parameter sources
 - Larminie, J. and Lowry, J. (2012). *Electric Vehicle Technology
   Explained*, 2nd ed. Motor efficiency maps, inverter losses,
   charging system architecture.
-- Mock, P. (2023). *European Passenger Car Market Statistics*.
-  International Council on Clean Transportation. Mass-vs-mission
-  scatter data for calibration.
+- Mock, P. et al. (2023). *European Vehicle Market Statistics
+  Pocketbook 2023/24*. International Council on Clean Transportation.
+  Mass-vs-mission scatter data for calibration.
 
 All numerical values are illustrative, drawn from the published
 ranges in the references above. They are *not* claimed to reflect
