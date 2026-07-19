@@ -1,5 +1,9 @@
 # codesign-mcdp
 
+[![tests](https://github.com/corentinbriat/codesign-mcdp/actions/workflows/test.yml/badge.svg)](https://github.com/corentinbriat/codesign-mcdp/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A Python library for **Monotone Co-Design Problems (MCDPs)**, following the
 mathematical framework of Andrea Censi, *A Mathematical Theory of Co-Design*
 ([arXiv:1512.08055](https://arxiv.org/abs/1512.08055)). It is a from-scratch
@@ -31,13 +35,13 @@ stochastic layers).
 Install the latest version directly from Git:
 
 ```bash
-pip install git+https://github.com/cbriat/codesign-mcdp.git
+pip install git+https://github.com/corentinbriat/codesign-mcdp.git
 ```
 
 Or clone and install in editable mode for development:
 
 ```bash
-git clone https://github.com/cbriat/codesign-mcdp.git
+git clone https://github.com/corentinbriat/codesign-mcdp.git
 cd codesign-mcdp
 pip install -e ".[dev]"      # everything: tests, plots, diagrams, notebooks
 ```
@@ -71,7 +75,7 @@ battery = AlgebraicDP(
 
 result = solve(battery, {"capacity": 3.6e6})  # 1 kWh
 print(result)
-# SolveResult(iters=0, converged=True, feasible=True)
+# SolveResult(iters=0, status='converged', feasible=True)
 #   Antichain[(mass=2 kg)]
 ```
 
@@ -537,12 +541,22 @@ with `solver` reading all four. `mcdpl` and `system` are thin builders on top.
 
 ## Running the tests
 
+Run the full suite with pytest:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The smoke test alone runs with no third-party dependencies:
+
 ```bash
 python -m tests.test_smoke
 ```
 
-A CI workflow at `.github/workflows/test.yml` runs the same smoke test on
-every push.
+A CI workflow at `.github/workflows/test.yml` runs the smoke test and a set of
+representative examples on Python 3.9 through 3.12 on every push and pull
+request.
 
 ## What this is and isn't
 
@@ -554,10 +568,11 @@ multi-subsystem designs. It does **not** ship:
 * the original MCDPL parser and its concrete `mcdp { ... }` text syntax (the
   `MCDP` builder in `mcdpl.py` provides the same shape in Python),
 * approximation strategies for non-finitely-representable antichains beyond
-  the bracket pattern of `UncertainDP`,
-* visualization of the design graph itself.
+  the bracket pattern of `UncertainDP`.
 
-These are tractable extensions on top of the current core.
+These are tractable extensions on top of the current core. (Design-graph
+visualisation, once absent, is now provided by `codesign.diagram`; see the
+block-diagram section above.)
 
 ## License
 

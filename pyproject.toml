@@ -45,8 +45,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cbriat/codesign-mcdp"
-Repository = "https://github.com/cbriat/codesign-mcdp"
+Homepage = "https://github.com/corentinbriat/codesign-mcdp"
+Repository = "https://github.com/corentinbriat/codesign-mcdp"
+Issues = "https://github.com/corentinbriat/codesign-mcdp/issues"
 "Paper (Censi 2015)" = "https://arxiv.org/abs/1512.08055"
 
 [tool.setuptools.packages.find]

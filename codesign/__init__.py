@@ -8,10 +8,10 @@ and solve the resulting MCDP via Kleene fixed-point iteration.
 
 Quick example:
 
-    from codesign import Reals, NamedProduct, AlgebraicDP, solve
+    from codesign import Reals, Ports, AlgebraicDP, solve
 
-    F = NamedProduct({"capacity": Reals(unit="J")})
-    R = NamedProduct({"mass": Reals(unit="kg")})
+    F = Ports({"capacity": Reals(unit="J")})
+    R = Ports({"mass": Reals(unit="kg")})
     battery = AlgebraicDP(F, R, {"mass": lambda f: f["capacity"] / 1.8e6})
     print(solve(battery, {"capacity": 3.6e6}))
 """

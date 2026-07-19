@@ -59,19 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests: `tests/test_vector_online.py` (11 tests) covering the vector grid
   primitives, the vector DP and its scalar-equivalence, the precompute-then-DP
   equivalence, and the online loop's feedback behaviour.
-
-### Fixed
-- **Correctness fix in the antichain-valued backward pass** (`sequential.py`
-  and `vector_dp.py`). The pass previously iterated the cost-Pareto-reduced
-  stage antichain before applying the carried-state transition, which could
-  discard a cost-dominated point that was the only feasible choice from a
-  constrained carried state (for example a higher-cost morphology that spares
-  a worn module). The pass now enumerates all solved points and lets
-  `union_min` prune only *after* the transition. `detect_resets` similarly now
-  checks all points. Existing examples and tests are unaffected (their
-  cost-dominated points had identical successors); the reconfigurable-robot
-  example is feasible only with the fix.
-
 - **Antichain-valued sequential co-design** (`codesign/sequential.py`,
   `examples/20_sequential_codesign.py`, `tests/test_sequential.py`). The
   multi-objective generalisation of the scalar `dynamic` layer: the value
@@ -253,20 +240,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   COGS, larger footprint) vs CHO-MK (smaller footprint, higher
   licence fee) tradeoff.
 
-### Changed
-- **Renamed `NamedProduct` to `Ports`** to match the library's everyday
-  vocabulary (port handles, outer F port, module R port, the operator
-  DSL is built on port handles). The old name is retained as a
-  backward-compatible alias (`NamedProduct = Ports`), so existing code
-  importing `NamedProduct` continues to work. All internal modules,
-  examples, notebooks, and documentation have been migrated to the new
-  name; the LaTeX manual now uses `Ports` throughout and explains the
-  alias.
-- Module-level docstrings in `codesign/posets.py` expanded with worked
-  rationale for each class and a clearer summary at the top.
-
-### Added
-
 #### Online learning (compositional, elimination-based)
 - New `codesign.online` module implementing the optimistic-evaluator
   solver from Alharbi, Dahleh & Zardini (arXiv:2604.22624).
@@ -407,11 +380,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   solver and other inspection tools.
 
 ### Changed
+- **Renamed `NamedProduct` to `Ports`** to match the library's everyday
+  vocabulary (port handles, outer F port, module R port, the operator
+  DSL is built on port handles). The old name is retained as a
+  backward-compatible alias (`NamedProduct = Ports`), so existing code
+  importing `NamedProduct` continues to work. All internal modules,
+  examples, notebooks, and documentation have been migrated to the new
+  name; the LaTeX manual now uses `Ports` throughout and explains the
+  alias.
+- Module-level docstrings in `codesign/posets.py` expanded with worked
+  rationale for each class and a clearer summary at the top.
 - `SolveResult.trace` is now `None` when tracing is disabled (instead of
   an empty list), so missing traces are distinguishable from empty ones.
   The default behaviour is unchanged: with no flags, `trace` is `None`.
 - `solve` and `kleene_loop` now use keyword-only arguments for the new
   observability and uncertainty options, to avoid call-site ambiguity.
+
+### Fixed
+- **Correctness fix in the antichain-valued backward pass** (`sequential.py`
+  and `vector_dp.py`). The pass previously iterated the cost-Pareto-reduced
+  stage antichain before applying the carried-state transition, which could
+  discard a cost-dominated point that was the only feasible choice from a
+  constrained carried state (for example a higher-cost morphology that spares
+  a worn module). The pass now enumerates all solved points and lets
+  `union_min` prune only *after* the transition. `detect_resets` similarly now
+  checks all points. Existing examples and tests are unaffected (their
+  cost-dominated points had identical successors); the reconfigurable-robot
+  example is feasible only with the fix.
 
 ## [0.1.0] - 2026-05-18
 
@@ -464,3 +459,6 @@ Initial release.
   every worked example, and modelling guidelines. Pre-built PDF
   (`codesign-mcdp-manual.pdf`) committed alongside the LaTeX source.
   Rebuilt with `make` in that directory.
+
+[Unreleased]: https://github.com/corentinbriat/codesign-mcdp/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/corentinbriat/codesign-mcdp/releases/tag/v0.1.0
