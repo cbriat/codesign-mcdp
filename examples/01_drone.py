@@ -19,14 +19,14 @@ Physics (simple lumped model):
     required mass       = energy / specific_energy
 
 Closing the loop: required_mass <= trial_mass.
-"""
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from codesign import (
-    Reals, Ports, FunctionDP, loop, solve,
-)
+Run:  python -m examples.01_drone
+Expected output: the drone DP signature, then one block per mission listing
+the number of Kleene iterations, feasibility, and the converged battery mass.
+"""
+from __future__ import annotations
+
+from codesign import Reals, Ports, FunctionDP, loop, solve
 
 
 ALPHA = 1.8e6           # specific energy J/kg

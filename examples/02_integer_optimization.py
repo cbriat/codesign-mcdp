@@ -19,6 +19,11 @@ The outer loop closes x_out >= x_in, y_out >= y_in. Because the splitting
 of c into (c1, c2) is non-deterministic, the antichain at the fixed point
 has multiple incomparable points -- the Pareto front for the resource
 pair (x, y).
+
+Run:  python -m examples.02_integer_optimization
+Expected output: for each c, the number of Kleene iterations, the trace of
+antichains S_0, S_1, ... ascending to the fixed point, and the final set of
+minimal (x, y) pairs M(c).
 """
 from __future__ import annotations
 
@@ -30,71 +35,19 @@ from codesign import (
     Loop,
     Ports,
     Naturals,
-    SolveResult,
     solve,
 )
 
 
-def make_problem():
-    """Build the MCDP for the sqrt+ceil+sum example."""
-    N = Naturals()
-
-    # Inner DP: functionality is (c, x_in, y_in), resource is (x_out, y_out).
-    # The loop will identify x_in with x_out and y_in with y_out.
-    F = Ports({"c": N, "x_in": N, "y_in": N})
-    R = Ports({"x_out": N, "y_out": N})
-
-    def h(f):
-        c = f["c"]
-        x_in = f["x_in"]
-        y_in = f["y_in"]
-        if c == math.inf or x_in == math.inf or y_in == math.inf:
-            return Antichain.singleton(R, {"x_out": math.inf, "y_out": math.inf})
-
-        # ceil(sqrt) of the current loop values.
-        sx = math.isqrt(int(x_in))
-        if sx * sx < int(x_in):
-            sx += 1
-        sy = math.isqrt(int(y_in))
-        if sy * sy < int(y_in):
-            sy += 1
-
-        # The constraint is x_out + y_out >= sx + sy + c, with x_out >= sx
-        # and y_out >= sy individually impossible to guarantee without
-        # splitting the slack. Enumerate every split (c1, c2) of the deficit:
-        # x_out = sx + c1, y_out = sy + c2, c1 + c2 = (sx + sy + c) - x_in - y_in
-        # but clipped at zero. To stay sound we enumerate from the strongest
-        # form: the antichain of (x, y) achieving x + y = sx + sy + c with
-        # x >= sx, y >= sy.
-        target = sx + sy + int(c)
-        pts = []
-        for x_out in range(sx, target - sy + 1):
-            y_out = target - x_out
-            if y_out < sy:
-                break
-            pts.append({"x_out": x_out, "y_out": y_out})
-        if not pts:
-            # Should never happen for c >= 0, but guard anyway.
-            return Antichain.empty(R)
-        return Antichain.from_set(R, pts)
-
-    inner = FunctionDP(F=F, R=R, h_fn=h, name="sqrt_sum_inner")
-
-    # Close the loop on both x and y. The Loop primitive in this library
-    # supports a single axis; chain two loops to identify both pairs.
-    # We rewire the inner so that its R also carries a copy of (x_in, y_in)
-    # under the same names used by the outer F. To keep things simple we
-    # express it as a single Loop on a composite axis: build an inner where
-    # F has 'c' plus the loop variables under the SAME names they will close
-    # over, and R exposes both the loop variables and a report.
-    return inner
-
-
 def make_looped(c_value: int):
-    """Build the Loop DP that closes x_out -> x_in and y_out -> y_in."""
+    """Build the Loop DP that closes x_out -> x_in and y_out -> y_in.
+
+    Both loop variables are bundled into a single composite axis ``xy`` so
+    that one Loop primitive closes the pair. The inner FunctionDP maps
+    (c, xy) -> (xy, xy_report): ``xy`` feeds the loop, ``xy_report`` mirrors
+    the value onto the outer resource so it stays visible in the result.
+    """
     N = Naturals()
-    # We rewrite the inner so that F = (c, xy) and R = (xy) with xy = Ports
-    # to use a single loop axis.
     XY = Ports({"x": N, "y": N})
     F = Ports({"c": N, "xy": XY})
     R = Ports({"xy": XY, "xy_report": XY})

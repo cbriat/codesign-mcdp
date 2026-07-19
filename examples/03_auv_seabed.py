@@ -18,6 +18,11 @@ power. The Kleene fixed-point iteration finds the Pareto front of
 
 For clarity, we close the loop on the design variables (v, r) and expose
 T, E, $ on the outer R.
+
+Run:  python -m examples.03_auv_seabed
+Expected output: for each survey area A, the Pareto front over (time,
+energy, cost), followed by the single design that minimizes a composite
+scalar cost.
 """
 from __future__ import annotations
 

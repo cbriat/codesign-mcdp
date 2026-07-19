@@ -5,6 +5,12 @@ Three independent subsystems are wired with the operator-overloaded
 ``>=`` syntax. The motor catalog has Pareto-incomparable entries, so the
 system-level result is a multi-point Pareto front over total mass and
 total cost.
+
+Run:  python -m examples.08_vehicle_modular
+Expected output: the System wiring summary, the compiled DP signature, and
+one block per scenario with the Pareto front over (total mass, total cost)
+and the cheapest feasible design. The heaviest scenario is infeasible with
+this motor catalog, which the output reports.
 """
 from __future__ import annotations
 
