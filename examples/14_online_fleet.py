@@ -31,10 +31,15 @@ The example shows three flavours of evaluator side by side:
 A plot at the end shades the feature plane by status (evaluated,
 eliminated, optimal) so the reader can see how the elimination cascade
 runs through the catalogue.
+
+Running this script prints the true Pareto front and each evaluator's
+evaluated/eliminated counts and Pareto-recovery check, then writes two
+files to ``outputs/``: ``fleet_online.png`` (the three feature-plane
+panels) and ``fleet_online_convergence.png`` (incumbent antichain size
+vs inner solves performed).
 """
 from __future__ import annotations
 
-import math
 import os
 import random
 from typing import Dict, List

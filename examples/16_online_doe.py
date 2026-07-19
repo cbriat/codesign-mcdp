@@ -72,6 +72,7 @@ Sources cited (parameter calibrations)
 from __future__ import annotations
 
 import math
+import random
 
 from codesign import (
     AlgebraicDP,
@@ -480,7 +481,6 @@ def main():
           f"({100*fac_match/max(len(true_classes),1):>4.0f}%)")
 
     # Second baseline: a uniform random sample of 40 candidates.
-    import random
     rng = random.Random(42)
     rand_indices = rng.sample(range(len(candidates)), 40)
     rand_results = []

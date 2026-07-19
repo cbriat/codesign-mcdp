@@ -17,10 +17,12 @@ These come out of a single Monte Carlo run; the worst-case (set-based)
 summary can be requested in the same call if a ``uncertain_set`` is
 also attached. Here we include it to show that all four summaries
 behave consistently: nominal < mean < p95 < cvar95 < worst_case.
+
+Running this script prints the nominal mass, the four statistical
+summaries, a bar chart of their ordering, and an ASCII histogram of
+the sampled total_mass distribution. No figures are produced.
 """
 from __future__ import annotations
-
-import math
 
 from scipy import stats
 
