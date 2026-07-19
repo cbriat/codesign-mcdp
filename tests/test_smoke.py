@@ -1,5 +1,6 @@
 """Quick smoke test verifying posets, antichains, and basic DPs."""
 import os
+import re
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -547,6 +548,40 @@ def test_viz_smoke():
     assert "battery" in dot and "actuator" in dot
     # cyclic-or-not, both modules should appear as nodes
     assert dot.count("[label=") >= 2
+
+    # Default-name output is unchanged: bare, unquoted "codesign" ID.
+    assert dot.startswith("digraph codesign {")
+
+    # Graph names with spaces, parens, or quotes must still yield valid dot.
+    def _parses_as_dot(src):
+        # Prefer a real parse via the graphviz python package or the dot
+        # binary; fall back to a structural check when neither is present.
+        try:
+            import graphviz
+            graphviz.Source(src).pipe(format="canon")
+            return True
+        except ImportError:
+            pass
+        except Exception:
+            return False
+        import shutil
+        import subprocess
+        if shutil.which("dot"):
+            p = subprocess.run(["dot", "-Tcanon"], input=src,
+                               capture_output=True, text=True)
+            return p.returncode == 0
+        # Structural fallback: first line is `digraph <id> {`, braces balance.
+        first = src.splitlines()[0]
+        ok_first = bool(re.match(
+            r'^digraph (?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"\\]|\\.)*") \{$', first))
+        return ok_first and src.count("{") == src.count("}")
+
+    for weird in ('my drone (v2)', 'a "quoted" name', "spaces and (parens)"):
+        wdot = viz.to_dot(drone, name=weird)
+        first = wdot.splitlines()[0]
+        # Non-identifier names must be double-quoted.
+        assert first.startswith('digraph "') and first.endswith(" {")
+        assert _parses_as_dot(wdot), f"invalid dot for name={weird!r}"
 
     # plot functions should at least import matplotlib lazily; we skip if
     # it isn't available, so the test passes on minimal installations.

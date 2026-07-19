@@ -22,6 +22,7 @@ the package stays usable without it.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
@@ -365,6 +366,14 @@ def _short_label(s: str, max_len: int = 32) -> str:
     return s if len(s) <= max_len else s[: max_len - 1] + "..."
 
 
+def _dot_graph_id(name: str) -> str:
+    """Return ``name`` usable as a dot graph ID: bare if already a valid identifier, else double-quoted with quotes/backslashes escaped."""
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return name
+    escaped = name.replace("\\", r"\\").replace('"', r"\"")
+    return f'"{escaped}"'
+
+
 def to_dot(dp, *, name: str = "codesign") -> str:
     """Emit a GraphViz dot string describing the DP's structure.
 
@@ -383,7 +392,7 @@ def to_dot(dp, *, name: str = "codesign") -> str:
     the graphviz package dependency.
     """
     counter = [0]
-    lines: List[str] = [f"digraph {name} {{"]
+    lines: List[str] = [f"digraph {_dot_graph_id(name)} {{"]
     lines.append("  rankdir=LR;")
     lines.append('  node [shape=box, style="rounded,filled", '
                  'fillcolor="#f6f6f6", fontname="Helvetica"];')
