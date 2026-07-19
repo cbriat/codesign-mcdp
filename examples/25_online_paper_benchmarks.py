@@ -113,15 +113,35 @@ Baselines
   (``pip install pymoo`` to enable). pymoo is intentionally NOT a project
   dependency.
 
+Validation status (independent replication, WP-P3)
+--------------------------------------------------
+Re-run at higher statistical strength (RUNS=20, ITERS=500, two independent
+master seeds, full pymoo EA panel):
+- **(a) and (b) reproduce robustly**: Ours < Halton on 8/8 for BOTH families
+  under both seeds, and Ours is best-of-all on every monotone instance (even
+  stronger than the paper's 7/8).
+- **(c) did NOT reproduce**: on the smooth Lipschitz family the continuous
+  EAs (MOEA/D in particular) match or beat Ours, and MOEA/D shows no blowups
+  here (max/median ~1.5-4x, not the paper's ~20x on L8) -- so it is neither
+  "poor" nor high-variance in this harness. Leading hypotheses: the EA panel
+  optimizes the CONTINUOUS box while Ours/Halton/Random are confined to the
+  fixed discrete pool (an asymmetry favouring EAs on smooth maps, with EA HVD
+  clipped at 0 against a discrete reference they can beat); the budget is far
+  below paper scale; and the EAs are untuned (fixed pop=20). Claims (a)/(b),
+  which isolate the elimination-vs-Halton effect on a shared pool, are the
+  fair apples-to-apples comparison and hold; (c) is reported but not counted
+  as reproduced.
+
 Run
 ---
     python -m examples.25_online_paper_benchmarks
 
 Expected output: two Table-I / Table-II-style panels (per-instance mean
 cumulative HVD for Ours / Halton / Random, plus EAs if pymoo is installed),
-PASS/FAIL verdicts for the reproducible claims, and two figures saved to
-``outputs/`` (mean HVD vs. iteration, log-y). Defaults are trimmed for a
-< ~2-3 min run; module-level constants below crank up to paper scale.
+per-claim verdicts (a/b reproduce; c reported as NOT REPRODUCED -- see above),
+and two figures saved to ``outputs/`` (mean HVD vs. iteration, log-y).
+Defaults are trimmed for a < ~2-3 min run; module-level constants below crank
+up to paper scale.
 """
 from __future__ import annotations
 
@@ -151,11 +171,15 @@ POOL_FACTOR = 8            # discretized pool size = POOL_FACTOR * budget
 K_ATOMS = 15               # monotone step atoms per output (K is UNPUBLISHED)
 LIPSCHITZ_L = 2.0          # paper: ||A||_2 = L = 2
 MONO_TARGET_ALPHA = 0.35   # monotone target f = alpha * per-coord range of g
-DELTA = 0.05               # paper Sec. VII-B: forced-acceptance prob. = 0.05
+DELTA = 0.05               # forced-acceptance prob.; paper's value (Sec.
+                           # VII-C3 case-study details; VII-B does not state it)
 REF_POINT = (1.0, 1.0)     # hypervolume reference (resources in [0,1]^2)
 BASE_SEED = 20260424       # arXiv id date; deterministic instances/runs
 
-# Paper reference numbers (used in the validation comments below):
+# Paper reference numbers (used in the validation comments below).
+# Notation "P .. Q" = first-column .. last-column of that row (M1 .. M8 /
+# L1 .. L8), NOT the row's min .. max (e.g. the OURS monotone row peaks at
+# M7 = 3.26e2, above both endpoints shown):
 #   Table I  (Monotone, OURS row):  8.81e1 .. 3.46e1  (best on 7/8 instances)
 #   Table II (Lipschitz, OURS row): 5.89e1 .. 4.20e1  (best on 5/8, 2nd on 2/3)
 
@@ -640,39 +664,69 @@ def validate(mono: Dict[str, np.ndarray], lip: Dict[str, np.ndarray]) -> None:
     print(f"    ours : Ours beats Halton on {b_wins}/{N_INSTANCES} "
           f"(need >= {b_need}) -> {'PASS' if b_pass else 'FAIL'}")
 
-    # Claim (c): EA panel (pymoo). Ours best-or-second on most instances, and
-    #   MOEA/D shows higher across-instance variance than Ours on Lipschitz.
+    # Claim (c): EA panel (pymoo).  Evaluated per family (never pooled -- a
+    #   pooled threshold lets the monotone family, where Ours is best-of-all,
+    #   mask the Lipschitz family, where it is not).  Independent validation
+    #   (WP-P3) found (c) does NOT reproduce at higher statistical strength:
+    #   the continuous EAs match/beat Ours on the smooth Lipschitz family and
+    #   MOEA/D shows no blowups here (see the "Validation status" docstring
+    #   note).  So we report the measured numbers and label the outcome
+    #   NOT REPRODUCED rather than emitting a fragile PASS.
+    def _best_or_2nd(means: Dict[str, np.ndarray]) -> Tuple[int, List[int]]:
+        methods = ["Ours", "Halton", "Random"] + [n for n in EA_NAMES
+                                                   if n in means]
+        ranks: List[int] = []
+        for j in range(N_INSTANCES):
+            col = sorted((means[m][j], m) for m in methods
+                         if m in means and np.isfinite(means[m][j]))
+            ranks.append([m for _, m in col].index("Ours") + 1)  # 1 = best
+        return sum(r <= 2 for r in ranks), ranks
+
     has_ea = any(n in lip for n in EA_NAMES)
     if not has_ea:
-        print("\n(c) [SKIPPED] EA claims need pymoo (not installed).")
+        print("\n(c) [SKIPPED] EA claims need pymoo (`pip install pymoo`).")
         print("    paper: Ours best-or-2nd on most instances; MOEA/D high"
               " variance\n    (Table II strong on L2/L5, poor on L8).")
     else:
-        all_methods = ["Ours", "Halton", "Random"] + \
-            [n for n in EA_NAMES if n in lip]
-        rank_ok, total = 0, 0
-        for means in (mono, lip):
-            for j in range(N_INSTANCES):
-                col = sorted((means[m][j], m) for m in all_methods
-                             if m in means and np.isfinite(means[m][j]))
-                rank = [m for _, m in col].index("Ours")
-                total += 1
-                rank_ok += int(rank <= 1)
-        c1 = rank_ok >= math.ceil(0.6 * total)
-        ours_var = float(np.nanvar(lip["Ours"]))
-        moead_var = float(np.nanvar(lip["MOEA/D"])) if "MOEA/D" in lip else 0.0
-        c2 = moead_var > ours_var
-        c_pass = c1 and c2
-        verdicts.append(c_pass)
-        print("\n(c) Ours best-or-2nd on most instances AND MOEA/D across-"
-              "instance\n    variance > Ours variance on Lipschitz")
-        print("    paper: Ours consistently best/2nd; MOEA/D high variance")
-        print(f"    ours : best-or-2nd on {rank_ok}/{total}; "
-              f"var(MOEA/D)={moead_var:.2e} vs var(Ours)={ours_var:.2e}  "
-              f"-> {'PASS' if c_pass else 'FAIL'}")
+        mb, m_ranks = _best_or_2nd(mono)
+        lb, l_ranks = _best_or_2nd(lip)
+        # Paper's (c) variance signal is MOEA/D *outlier blowups* on Lipschitz
+        # (e.g. L8 = 1.04e3, ~20x its median), NOT merely a larger variance.
+        # Measure it directly as a max/median ratio (and CV), and report both
+        # MOEA/D and Ours either way.
+        def _spread(v: np.ndarray) -> Tuple[float, float]:
+            v = v[np.isfinite(v)]
+            med = float(np.median(v))
+            ratio = float(np.max(v) / med) if med > 0 else float("nan")
+            cv = float(np.std(v) / np.mean(v)) if np.mean(v) > 0 else float("nan")
+            return ratio, cv
+        o_ratio, o_cv = _spread(lip["Ours"])
+        moead_present = "MOEA/D" in lip
+        m_ratio, m_cv = (_spread(lip["MOEA/D"]) if moead_present
+                         else (float("nan"), float("nan")))
+        print("\n(c) [EA panel] paper: Ours best-or-2nd on most instances "
+              "(Table II\n    best on 5/8, 2nd on 2/3) AND MOEA/D shows "
+              "occasional blowups\n    on Lipschitz (e.g. L8 ~ 20x its median).")
+        print(f"    ours : best-or-2nd  monotone {mb}/{N_INSTANCES} "
+              f"(ranks {m_ranks}),  lipschitz {lb}/{N_INSTANCES} "
+              f"(ranks {l_ranks})")
+        print(f"    ours : Lipschitz spread  MOEA/D max/med={m_ratio:.1f}x "
+              f"cv={m_cv:.2f}   Ours max/med={o_ratio:.1f}x cv={o_cv:.2f}")
+        print("    -> NOT REPRODUCED at higher statistical strength "
+              "(WP-P3; see docstring).")
+        print("       On the smooth Lipschitz family the continuous EAs "
+              "match/beat Ours\n       and MOEA/D shows no blowup here; only "
+              "(a)/(b) reproduce robustly.")
 
     print("\n" + "-" * 74)
-    print(f"VERDICT: {sum(verdicts)}/{len(verdicts)} evaluated claims PASS")
+    reproduced = "PASS" if all(verdicts) else "MIXED"
+    print(f"VERDICT: (a) {'PASS' if verdicts[0] else 'FAIL'}, "
+          f"(b) {'PASS' if verdicts[1] else 'FAIL'}  "
+          f"[elimination-vs-Halton claims{' both' if reproduced=='PASS' else ''}"
+          f" reproduce]")
+    print("         (c) NOT REPRODUCED at higher statistical strength -- EA "
+          "panel;\n         see the 'Validation status' note in the module "
+          "docstring.")
     print("-" * 74)
 
 
