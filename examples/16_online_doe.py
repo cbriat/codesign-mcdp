@@ -526,12 +526,18 @@ def main():
 
     print()
     print(f"  Exhaustive baseline: 375 inner solves found {len(true_classes)}")
-    print(f"  distinct Pareto classes. At budget 40, both LinearParametric and")
-    print(f"  Lipschitz recover the same 3 / 4 classes as a 75-run factorial")
-    print(f"  DOE (a 47% reduction in bioreactor runs at equal recovery).")
-    print(f"  Monotonicity alone is uninformative without warm-start at low-")
-    print(f"  feature corner candidates; in a real campaign you would seed it")
-    print(f"  with 3 to 5 hand-picked corner runs first.\n")
+    print(f"  distinct Pareto classes. At budget 40 the tuned Lipschitz")
+    print(f"  evaluator recovers 3 / 4 classes, matching the 75-run factorial")
+    print(f"  DOE at a 47% reduction in bioreactor runs. The certified")
+    print(f"  LinearParametric evaluator recovers 0 / 4 here: this effect")
+    print(f"  model is nonlinear, so no affine parameter set fits the data,")
+    print(f"  its confidence polytope cannot support a useful bound, and it")
+    print(f"  safely degrades to no-information rather than eliminate a")
+    print(f"  candidate it cannot rule out (on a linear map such as example")
+    print(f"  14's fleet it instead recovers every Pareto point).")
+    print(f"  Monotonicity alone is likewise uninformative without warm-start")
+    print(f"  at low-feature corner candidates; in a real campaign you would")
+    print(f"  seed it with 3 to 5 hand-picked corner runs first.\n")
 
     # ----- Demonstration of the warm-start mechanism --------------------
     # The Monotonicity evaluator scored 0 / 4 above because its lower

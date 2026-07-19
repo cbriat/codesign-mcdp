@@ -23,10 +23,16 @@ The example shows three flavours of evaluator side by side:
 - **Monotonicity** is the cheapest when applicable; here we manufacture
   a derived feature ``cost_per_capacity`` under which ``total_cost``
   is genuinely monotone. With the right feature, this is the workhorse.
-- **Linear-parametric** is the most aggressive but the least safe: when
-  the underlying map is nearly linear, the confidence band tightens
-  fast and many candidates fall away; when it isn't, the bound can be
-  too tight and Pareto-optimal candidates can be wrongly eliminated.
+- **Linear-parametric** is now the certified confidence-polytope bound
+  of the paper (Sec. V-C3): it maintains the polytope of linear
+  parameter vectors consistent with every observation and lower-bounds
+  each query by one LP over that polytope. The bound is guaranteed, so
+  it never wrongly eliminates a Pareto-optimal candidate -- on this
+  catalogue it recovers all 5 Pareto types (the old OLS +/- confidence
+  band dropped one on this seed). It prunes less than the local bounds
+  here (it evaluates 122/200) because ``total_cost`` is not affine in
+  the raw features; it becomes exact and aggressive only when the map
+  truly is linear.
 
 A plot at the end shades the feature plane by status (evaluated,
 eliminated, optimal) so the reader can see how the elimination cascade
