@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **Vectorized `MonotonicityEvaluator.bound()` and
+  `LipschitzEvaluator.bound()`** (`codesign/online.py`). Both evaluators
+  previously re-scanned the entire observation history with a
+  Python-level per-observation loop on every `bound()` call, so an
+  Algorithm-1-style elimination loop (one `bound()` per surviving
+  candidate while the history grows to the budget) cost O(budget^2)
+  Python work and dominated paper-scale runs. The scan is now performed
+  with numpy over an incrementally-maintained observation matrix
+  (amortized O(1) append in `observe()`): the join over observed
+  predecessors / meet over successors (monotonicity) and the
+  `max(r - L*dist)` cone bound (Lipschitz) are computed as vectorized
+  array reductions. This keeps the per-call cost O(history) but removes
+  the Python-loop constant, measuring 8-16x faster on the growing-history
+  workload (N=4000 single run drops from ~6-8 s to well under 1 s). The
+  bounds returned are unchanged (a pure performance change; equivalence
+  to a naive reference is pinned by `tests/test_online_bound_perf.py`
+  over 224 random scenarios and edge cases, max deviation 0). A
+  pure-Python fallback is retained for when numpy is unavailable, and
+  the public evaluator API and semantics are unchanged.
+
+### Changed
+- **Unified the drone model across examples** (`examples/11_uncertain_drone.py`, `examples/12_stochastic_drone.py`). The uncertainty-demo drone's nominal battery parameters were re-parameterised to `specific_energy=2.0e6, efficiency=0.9` so their product (1.8 MJ/kg delivered) reduces exactly to the canonical drone of examples 01/06/07: the nominal solve now converges to the same 0.5492 kg (was 0.5602 kg). Uncertainty sets were recentred/widened to keep the Box/Ellipsoid/Monte-Carlo spreads meaningful; manual, notebooks, and smoke tests updated to match.
+- **Certified `LinearParametricEvaluator`** (`codesign/online.py`). The
+  online-learning linear-parametric evaluator was reimplemented as the
+  certified optimistic bound of Alharbi, Dahleh & Zardini
+  (arXiv:2604.22624), Section V-C3, equations (26)-(28) and Lemma V.5.
+  The previous version was an ordinary least-squares fit with a
+  heuristic `+/- confidence * sigma` band, which is **not** a guaranteed
+  lower bound and could wrongly eliminate an optimal candidate (observed
+  in `examples/14_online_fleet.py`, where it dropped the true Pareto
+  point `r033`). The new evaluator maintains a confidence polytope
+  `Theta(H) = { theta in Theta_0 : phi(j).theta = r for all observations }`
+  over the unknown linear parameters and returns, per resource
+  coordinate, the minimum predicted resource over that polytope
+  (`min_{theta in Theta(H)} phi(i).theta`) via one
+  `scipy.optimize.linprog` LP each. This bound is a true optimistic
+  (guaranteed lower-bounding) evaluator, so a candidate is eliminated
+  only when it is provably suboptimal. New keyword arguments: `prior_box`
+  (the prior set `Theta_0` on the parameters, needed to keep the LP
+  bounded when the fit is under-determined; default unbounded, which is
+  always safe), `noise_bound` (half-width of a bounded-noise
+  observation band; default `0.0`, the paper's exact/noiseless model),
+  and `solver` (linprog method). The `confidence` keyword is deprecated
+  and ignored (passing it emits a `DeprecationWarning`); `min_obs` is
+  unchanged. Covered by `tests/test_online_linear_parametric.py` (15
+  tests: an optimism property test over random linear instances, an
+  explicit demonstration that the old OLS band over-eliminates where the
+  certified bound stays valid, the degenerate cases, and full-Pareto
+  recovery against the no-pruning baseline). Note: on a genuinely
+  non-linear inner-solve map (e.g. `examples/16_online_doe.py`) the
+  exact-linear LPs are infeasible and the bound safely degrades to the
+  trivial `0` rather than making unsafe eliminations.
+
 ### Added
 - **Formula 1 seasonal co-design** (`examples/23_formula1_season.py`,
   `tests/test_formula1.py`). A faithful reproduction of the hierarchical

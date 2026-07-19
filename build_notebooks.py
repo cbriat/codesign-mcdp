@@ -1217,6 +1217,8 @@ NB_11 = [
 
 The drone from notebook 07 is extended so the battery has two internal parameters (specific energy, efficiency) that are known only up to an uncertainty set. The question is: under the worst-case point of that set, how heavy does the drone become?
 
+The nominal parameters (specific_energy = 2.0 MJ/kg, efficiency = 0.90) have a product of 1.8 MJ/kg of *delivered* energy density, so the nominal solve converges to exactly the canonical drone's 0.5492 kg (notebooks 01/06/07). The uncertainty sets perturb around that shared reference.
+
 Two sets are exercised:
 
 - A `Box`: rectangular ranges on the two parameters, with each range declared in the "more is better" direction so the worst case is the corner where both parameters take their lowest values.
@@ -1230,7 +1232,7 @@ Set-based uncertainty fits MCDP naturally: monotonicity means the worst case is 
 class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
-    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+    def __init__(self, specific_energy=2.0e6, efficiency=0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
@@ -1264,15 +1266,15 @@ nominal_mass = list(nominal.antichain.points)[0]["total_mass"]
 print(f"nominal total_mass = {nominal_mass:.4f} kg")"""),
     ("md", """## Box uncertainty
 
-The Box puts independent ranges on each parameter. Because both are declared "more is better," the worst case is the single corner where specific_energy = 1.6e6 and efficiency = 0.80.
+The Box puts independent ranges on each parameter. Because both are declared "more is better," the worst case is the single corner where specific_energy = 1.7e6 and efficiency = 0.83.
 """),
     ("code", """bat = Battery()
 # Box: independent ranges on each parameter. The direction-of-badness token
 # tells the solver which endpoint is the "worst" - for both parameters here,
 # lower is worse since they're declared "more_is_better".
 bat.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
 drone = make_drone(bat)
 
@@ -1290,7 +1292,7 @@ The Ellipsoid carves out the implausible corner where both parameters are simult
 # specific_energy makes optimistic on efficiency more likely, and vice
 # versa. The worst case is therefore not the joint-pessimistic corner.
 bat.uncertain_set = Ellipsoid(
-    center={"specific_energy": 1.8e6, "efficiency": 0.85},
+    center={"specific_energy": 2.0e6, "efficiency": 0.9},
     cov=[
         [1.0e10, -2.0e3],     # variance of specific_energy, covariance
         [-2.0e3,  2.5e-3],    # covariance, variance of efficiency
@@ -1310,9 +1312,9 @@ print(f"Ellipsoid worst case: {wc_ell:.4f} kg  (penalty {wc_ell - nominal_mass:+
 
 | Set       | Worst-case mass | Penalty vs nominal |
 |-----------|-----------------|--------------------|
-| (nominal) | 0.5602 kg       | -                  |
-| Box       | 0.5760 kg       | +0.0158 kg         |
-| Ellipsoid | 0.5652 kg       | +0.0050 kg         |
+| (nominal) | 0.5492 kg       | -                  |
+| Box       | 0.5668 kg       | +0.0176 kg         |
+| Ellipsoid | 0.5527 kg       | +0.0035 kg         |
 
 The ellipsoid is the more honest model when you believe the two parameters are correlated, since it rejects the "both at the worst simultaneously" combination as implausible. The 2D conveniences `Disk(center, radius)` and `Circle(center, radius)` are special cases of `Ellipsoid`.
 """),
@@ -1339,7 +1341,7 @@ from codesign import (
 class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
-    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+    def __init__(self, specific_energy=2.0e6, efficiency=0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
@@ -1355,8 +1357,8 @@ class Actuator(Module):
 bat = Battery()
 # Set-based bracket: the Box gives a deterministic worst-case answer.
 bat.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
 # Stochastic model: two uniform marginals tied by a Gaussian copula.
 # The 0.4 off-diagonal entry means specific_energy and efficiency are
@@ -1364,8 +1366,8 @@ bat.uncertain_set = Box(
 # be efficient too), softening the joint-pessimistic case.
 bat.uncertain_dist = Stochastic(
     marginals={
-        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+        "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+        "efficiency":      stats.uniform(loc=0.83, scale=0.14),
     },
     copula=GaussianCopula(correlation=[[1.0, 0.4],
                                        [0.4, 1.0]]),
@@ -1711,7 +1713,7 @@ This notebook reproduces the spirit of the multi-robot fleet case study. A logis
 
 - **Lipschitz**: the most general assumption (bounded variation), the most reliable, modest pruning.
 - **Monotonicity**: cheapest when applicable; needs a feature under which the output is genuinely monotone.
-- **LinearParametric**: aggressive but riskier; fits a linear model and prunes by its confidence band.
+- **LinearParametric**: now the *certified* confidence-polytope bound of the paper (Sec. V-C3). It is guaranteed never to prune a Pareto-optimal candidate; it is exact and aggressive only when the resource map is genuinely affine in the features.
 """),
 
     ("md", "## The problem"),
@@ -1817,13 +1819,16 @@ evs = [
         features=["cost_per_capacity", "energy_per_km"],
         r_components=["total_cost", "total_energy"],
     )),
-    # LinearParametric: fits a running OLS regressor with a 3-sigma
-    # confidence band. min_obs=5 means it only starts bounding after
-    # five evaluations.
-    ("LinearParametric", LinearParametricEvaluator(
+    # LinearParametric: the certified confidence-polytope bound of the
+    # paper (Sec. V-C3). It maintains the polytope of linear parameter
+    # vectors consistent with every observation and lower-bounds each
+    # query by one LP over that polytope, so the bound is guaranteed and
+    # it never wrongly eliminates a Pareto point. min_obs=5 means it only
+    # starts bounding after five evaluations.
+    ("LinearParametric (certified)", LinearParametricEvaluator(
         features=["speed", "payload", "unit_cost", "energy_per_km"],
         r_components=["total_cost", "total_energy"],
-        confidence=3.0, min_obs=5,
+        min_obs=5,
     )),
 ]
 results = []
@@ -1868,9 +1873,9 @@ plt.show()"""),
 
 - **Lipschitz** is conservative: with the L values we picked, almost every candidate gets evaluated. The pruning rate is modest because the Lipschitz bound only tightens by `L * distance` around each observation, so distant candidates remain plausible.
 - **Monotonicity** is aggressive: because `cost_per_capacity` is genuinely monotone-related to `total_cost` (it's literally proportional), one observation eliminates everything with strictly worse features. Most of the catalog gets ruled out within a dozen evaluations.
-- **LinearParametric** falls in between. The linear model converges quickly on a fit, but the confidence band can be too tight when the true relationship is nonlinear, so it can wrongly eliminate a Pareto candidate. In the run above, this is what causes the smaller antichain.
+- **LinearParametric** is now the *certified* bound: it evaluates 122/200 and provably recovers all five Pareto points. Because it maintains the whole polytope of linear parameter vectors consistent with the observations (rather than a single OLS fit with a confidence band), its lower bound can never drop a Pareto-optimal candidate. It prunes less than the local bounds here because `total_cost` is not exactly affine in the raw features; it becomes exact and aggressive only when the map truly is linear. (The former OLS +/- 3-sigma heuristic pruned harder -- about 35/200 -- but wrongly dropped one Pareto point on this seed.)
 
-The choice between evaluators is a classical bias-variance tradeoff: stronger structural assumptions mean fewer evaluations needed, but more risk of wrongly pruning. In production code the safe default is Lipschitz with a conservative L; switch to monotonicity only when you can verify the feature is genuinely monotone.
+The choice between evaluators is a classical bias-variance tradeoff: stronger structural assumptions mean fewer evaluations needed. With the certified evaluators none of them can wrongly prune -- Lipschitz (with a valid L), Monotonicity (on a genuinely monotone feature), and the certified LinearParametric (on a genuinely affine map) all carry a guarantee. The remaining question is purely how much pruning you get: Monotonicity is the workhorse when you have a monotone feature, Lipschitz is the safe general default, and certified LinearParametric is exact and aggressive precisely when the resource map is linear in the features.
 
 ## Where this matters
 
@@ -2423,7 +2428,7 @@ We compare against two non-online baselines and run the three online evaluators 
 
 4. **Monotonicity online evaluator** on the three monotone-bad features (`pH_distance`, `glucose_extremity`, `feed_delay`), restricted to bounding the cogs axis.
 
-5. **LinearParametric online evaluator**: fits a running least-squares model and bounds by a 2.5-sigma confidence band.
+5. **LinearParametric online evaluator**: the certified confidence-polytope bound (Sec. V-C3). It carries a guarantee never to prune a Pareto-optimal candidate, but only bounds usefully when the resource map is genuinely affine in the features.
 
 The metric is "Pareto classes recovered" by `(cogs, footprint)` value (since many candidates produce the same outcome, counting by candidate identity would understate recovery).
 """),
@@ -2476,7 +2481,7 @@ evals = [
                             ["pH_distance", "glucose_extremity", "feed_delay"],
                             ["cogs_per_g"])),
     ("LinearParametric", LinearParametricEvaluator(norm_feat, r_comp,
-                            confidence=2.5, min_obs=10)),
+                            min_obs=10)),
 ]
 online_results = {}
 for name, ev in evals:
@@ -2499,9 +2504,9 @@ for name, res in online_results.items():
           f"{100*len(true_classes & rc)/len(true_classes):>9.0f}%")"""),
     ("md", """## Visualise the elimination cascade
 
-The left panel shows every candidate in $(\\text{cogs}, \\text{footprint})$ space. Grey points are candidates that the LinearParametric online solver eliminated or did not evaluate. Coloured points are the 40 it did evaluate. Red stars mark the true Pareto front classes.
+The left panel shows every candidate in $(\\text{cogs}, \\text{footprint})$ space. Grey points are candidates the LinearParametric online solver did not evaluate (with the certified bound it never *eliminates* a candidate here -- see below). Coloured points are the 40 it did evaluate. Red stars mark the true Pareto front classes.
 
-The right panel shows the trajectory of which candidate the LinearParametric picker chose at each iteration, plotted in the (`T_C`, `glucose_mm`) projection. The solver explores broadly in the first 10 iterations (when `min_obs=10` hasn't been reached and bounds are uninformative) and then concentrates near the predicted Pareto-optimal region.
+The right panel shows the trajectory of which candidate the LinearParametric picker chose at each iteration, plotted in the (`T_C`, `glucose_mm`) projection. Because this effect model is markedly nonlinear, the certified confidence polytope never tightens into a useful bound, so the picker keeps exploring broadly across the grid rather than concentrating -- and, correctly, recovers none of the Pareto classes rather than risk a wrong elimination.
 """),
     ("code", """fig, axes = plt.subplots(1, 2, figsize=(13, 5))
 
@@ -2556,7 +2561,9 @@ fig.tight_layout()
 plt.show()"""),
     ("md", """## What this example demonstrates
 
-At budget 40 (11% of the grid, a 89% reduction in wet-lab work), the LinearParametric online solver recovers 3 of 4 Pareto classes, matching a 75-run factorial DOE at 53% of the experimental cost. The Lipschitz evaluator achieves the same recovery rate with a tuned $L$ constant, but is more sensitive to the choice of $L$: a sweep over $L \\in \\{10, 15, 20, 25, 35\\}$ gives recovery $2, 1, 1, 1, 3$ respectively. In a real campaign you would calibrate $L$ from preliminary scale-down or historical-batch data.
+At budget 40 (11% of the grid, an 89% reduction in wet-lab work), the tuned Lipschitz online solver recovers 3 of 4 Pareto classes, matching a 75-run factorial DOE at 53% of the experimental cost. Lipschitz is sensitive to the choice of $L$: a sweep over $L \\in \\{10, 15, 20, 25, 35\\}$ gives recovery $2, 1, 1, 1, 3$ respectively, so in a real campaign you would calibrate $L$ from preliminary scale-down or historical-batch data.
+
+The certified LinearParametric evaluator, by contrast, recovers **zero** of the 4 classes here -- and correctly so. This effect model is markedly nonlinear (temperature U-shapes, a power-law failure rate), so no single affine parameter set fits the observations, the confidence polytope cannot support a non-trivial bound, and the evaluator falls back to the no-information value rather than risk eliminating a candidate it cannot certify as suboptimal. This is the safe-degradation property in action: on example 14's genuinely linear fleet catalogue the same evaluator recovers *every* Pareto point, whereas here it declines to guess. When you need reach on a smooth nonlinear surface at the price of an uncertified bound, a Gaussian process is the better tool.
 
 The Monotonicity evaluator alone is uninformative on this problem because its lower bounds only tighten for candidates that lie above every observed candidate in the partial order on monotone-bad features. With no observation yet at the low-feature corner, every Pareto-optimal candidate has lower bound zero and the picker wanders. In a real campaign you would seed it with three to five hand-picked corner runs (one at each extreme of each feature) before letting it pick.
 
@@ -3627,6 +3634,152 @@ The framework's contribution is the same as in notebook 17 -- every subsystem R 
 ]
 
 
+# ---------------------------------------------------------------------------
+# NB 25: reproducing the online co-design paper's synthetic benchmarks
+# ---------------------------------------------------------------------------
+
+NB_25 = [
+    ("md", """# 25. Reproducing the online co-design paper's synthetic benchmarks
+
+This notebook is a *replication study*. It re-runs the two synthetic benchmark families from Alharbi, Dahleh & Zardini, **"Compositional Online Learning for Multi-Objective System Co-Design"** (arXiv:2604.22624, 2026), and reports honestly on which of the paper's claims reproduce and which do not.
+
+The paper studies online multi-objective decision-making in *monotone co-design*: functionalities and resources are partially ordered, and the agent must recover the target-feasible antichain of non-dominated resources using as few expensive evaluations as possible. Its engine is **Algorithm 1** (rejection sampler with optimistic evaluators): draw a candidate from a low-discrepancy base measure, compute history-dependent *optimistic* bounds on its resource and functionality, and skip (reject) it without evaluation when either its optimistic resource is already dominated by the incumbent (eq. 13) or its optimistic functionality can never meet the target (eq. 14). Only survivors are actually queried.
+
+**What this example replicates** are the two synthetic families of Section VII-B:
+
+- **E1 / Monotone** (Table I): a monotone step map `g: [0,1]^3 -> [0,1]^2`. The optimistic bound is the monotone join of eqs. (23)-(24), i.e. `codesign.online.MonotonicityEvaluator`.
+- **E2 / Lipschitz** (Table II): an `L=2`-Lipschitz triangle-wave map `g: [0,1]^4 -> [0,1]^2`. The optimistic bound is the Lipschitz cone of eq. (25), i.e. `codesign.online.LipschitzEvaluator` with `L=2`.
+
+The library's evaluators supply the optimistic lower bounds (their `bound()` reproduces eqs. 23-25 exactly); Algorithm 1 itself -- the scrambled-Halton base measure, the two elimination conditions, and the forced-acceptance knob `delta` -- is implemented in the example, because the library's `solve_online` *scans* a candidate list with an upper-confidence picker whereas the paper *samples* a base measure with rejection.
+
+**What is not replicated**: E3 (intermodal mobility, a large multi-commodity-flow LP) and E4 (heterogeneous multi-robot, a planner-executor simulation) -- neither expensive block is in this repository. There is no public code/data release and the exact seeds, grid, and atom count `K` are unpublished, so this replication is *statistical, not bit-exact*: the precise table entries cannot be reproduced, only the qualitative claims.
+"""),
+
+    ("md", "## Imports and module load"),
+    ("code", """import importlib.util, os, sys, time
+PROJECT_ROOT = os.path.abspath('.')
+sys.path.insert(0, PROJECT_ROOT)
+
+_spec = importlib.util.spec_from_file_location(
+    'ex25', os.path.join(PROJECT_ROOT, 'examples', '25_online_paper_benchmarks.py'))
+ex25 = importlib.util.module_from_spec(_spec)
+sys.modules['ex25'] = ex25
+_spec.loader.exec_module(ex25)
+
+print("Module loaded.")
+print(f"  instances (M1..M8 / L1..L8) : {ex25.N_INSTANCES}")
+print(f"  runs per instance           : {ex25.RUNS}")
+print(f"  budget  (monotone/lipschitz): {ex25.ITERS_MONO} / {ex25.ITERS_LIP}")
+print(f"  K atoms (unpublished)       : {ex25.K_ATOMS}")
+print(f"  Lipschitz L                 : {ex25.LIPSCHITZ_L}")
+print(f"  forced-acceptance delta     : {ex25.DELTA}")
+try:
+    import pymoo
+    print(f"  pymoo {pymoo.__version__} present -> EA panel (NSGA-III / MOEA/D / RVEA) will run")
+except Exception:
+    print("  pymoo absent -> EA panel skipped")"""),
+
+    ("md", """## The honest deviation on the monotone family
+
+Before running, one caveat the example is careful to document. The paper says the target functionality is "fixed and satisfied by construction, so the learning problem reduces to recovering the non-dominated antichain of a resource map `g`". Taken literally this is *degenerate* for the monotone family: a monotone `g` is minimized at the bottom of the box, so its unconstrained minimal antichain collapses to the single point `g(0)=(0,0)` and there is nothing to learn.
+
+The example therefore keeps the Lipschitz family as the literal unconstrained minimization, and for the monotone family makes the functionality target **binding**: it recovers `FixFunMinRes(f)`, the minimal antichain of `g` restricted to the feasible upper set `{x : g(x) >= f}`. This is the standard co-design query, it exercises *both* elimination conditions (13) and (14), and it makes the monotone benchmark non-degenerate. The Lipschitz family is unaffected. The metric in both panels is cumulative hypervolume difference (lower is better), summed over iterations exactly as in the paper's tables.
+"""),
+
+    ("md", """## Run the benchmark
+
+We call the example's `run_family` driver directly, once per family, with the EA panel enabled. At the trimmed default scale this takes on the order of ten seconds; the module-level constants (`RUNS`, `ITERS_MONO`, `ITERS_LIP`) crank up to the paper's 100-run, 4000/2000-iteration scale.
+"""),
+    ("code", """t0 = time.time()
+
+mono_means, mono_curves = ex25.run_family(
+    "Monotone", ex25.make_monotone_map, d=3,
+    feature_names=["x0", "x1", "x2"],
+    make_evaluator=lambda ff: ex25.MonotonicityEvaluator(ff, list(ex25.RC)),
+    constrained=True, budget=ex25.ITERS_MONO, with_ea=True)
+
+lip_means, lip_curves = ex25.run_family(
+    "Lipschitz", ex25.make_lipschitz_map, d=4,
+    feature_names=["x0", "x1", "x2", "x3"],
+    make_evaluator=lambda ff: ex25.LipschitzEvaluator(ff, list(ex25.RC),
+                                                      L=ex25.LIPSCHITZ_L),
+    constrained=False, budget=ex25.ITERS_LIP, with_ea=True)
+
+print(f"\\nbenchmark runtime: {time.time() - t0:.1f} s")"""),
+
+    ("md", """## Table I -- Monotone problems (E1)
+
+Per-instance mean cumulative HVD for each method across the eight instances. `Ours` is Algorithm 1 with the monotone optimistic bound; `Halton` uses the same low-discrepancy proposals but *no* elimination; `Random` draws uniformly from the shared pool; the EA rows (if pymoo is present) run pymoo's NSGA-III / MOEA/D / RVEA over the continuous box.
+"""),
+    ("code", """ex25.print_panel("TABLE I  -- Monotone problems (E1), FixFunMinRes(f)",
+                 "paper Table I OURS row: 8.81e1 .. 3.46e1", "M", mono_means)"""),
+
+    ("md", """## Table II -- Lipschitz problems (E2)
+
+The same panel for the `L=2` Lipschitz family (pure unconstrained minimization).
+"""),
+    ("code", """ex25.print_panel("TABLE II -- Lipschitz problems (E2), pure minimization",
+                 "paper Table II OURS row: 5.89e1 .. 4.20e1", "L", lip_means)"""),
+
+    ("md", """## Validation: which claims reproduce?
+
+The example checks the paper's *reproducible qualitative* claims and prints per-claim verdicts. The absolute table entries are **not** bit-reproducible (unpublished seeds / grid / `K`); only the relative claims are testable.
+"""),
+    ("code", "ex25.validate(mono_means, lip_means)"),
+
+    ("md", """### The example's own honest validation note
+
+The critical outcome is claim (c). Quoting the example module's `Validation status` docstring verbatim -- this is an independent re-run at higher statistical strength (WP-P3), and the outcome is *not* softened:
+"""),
+    ("code", """doc = ex25.__doc__
+start = doc.index("Validation status")
+end = doc.index("Run\\n---")
+print(doc[start:end].rstrip())"""),
+
+    ("md", """## The HVD convergence figures
+
+Mean hypervolume difference versus iteration (expensive evaluations), averaged over all instances and runs, on a log-y axis. `Ours` (red) should sit below `Halton` (blue dashed) throughout -- the claim (a)/(b) signal. The EA curves optimize the *continuous* box while Ours/Halton/Random are confined to the shared discrete pool, an asymmetry that favours the EAs on the smooth Lipschitz map and underlies the (c) non-reproduction.
+"""),
+    ("code", """import matplotlib.pyplot as plt
+import numpy as np
+
+STYLES = {"Ours": ("C3", "-", 2.4), "Halton": ("C0", "--", 1.6),
+          "Random": ("C7", ":", 1.6), "NSGA-III": ("C2", "-.", 1.3),
+          "MOEA/D": ("C1", "-.", 1.3), "RVEA": ("C4", "-.", 1.3)}
+
+def plot_family(family, mean_curves, ax):
+    for m, curve in mean_curves.items():
+        if curve is None:
+            continue
+        color, ls, lw = STYLES.get(m, ("C5", "-", 1.2))
+        x = np.arange(1, len(curve) + 1)
+        y = np.clip(curve, 1e-6, None)   # floor for the log axis
+        ax.plot(x, y, color=color, linestyle=ls, linewidth=lw, label=m)
+    ax.set_yscale("log")
+    ax.set_xlabel("iteration (expensive evaluations)", fontsize=11)
+    ax.set_ylabel("HV(A_ref) - HV(A_hat)", fontsize=11)
+    ax.set_title(f"{family}: mean HVD over "
+                 f"{ex25.N_INSTANCES} instances x {ex25.RUNS} runs", fontsize=12)
+    ax.legend(loc="upper right", frameon=True, fontsize=9)
+    ax.grid(True, which="both", alpha=0.25)
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
+plot_family("Monotone (E1)", mono_curves, axes[0])
+plot_family("Lipschitz (E2)", lip_curves, axes[1])
+fig.tight_layout()
+plt.show()"""),
+
+    ("md", """## Takeaways
+
+- **Claims (a) and (b) reproduce robustly.** On both families `Ours` (Algorithm 1 with the certified optimistic bound) beats plain `Halton` on the shared discrete pool -- exactly the elimination-vs-no-elimination comparison the paper makes, and the apples-to-apples one. In the higher-strength WP-P3 re-run, `Ours` was best-of-all on *every* monotone instance, even stronger than the paper's 7/8.
+
+- **Claim (c) did NOT reproduce.** On the smooth Lipschitz family the continuous EAs (MOEA/D in particular) match or beat `Ours`, and MOEA/D shows *no* blow-ups here (max/median only ~1.5-4x, not the paper's ~20x on L8). The leading explanation is structural: the EA panel optimizes the continuous `[0,1]^d` box while Ours/Halton/Random are confined to a fixed discrete pool, an asymmetry that favours the EAs on smooth maps (their HVD is clipped at 0 against a discrete reference they can actually beat); the budget is also far below paper scale and the EAs are untuned. This is reported as measured and labelled **NOT REPRODUCED** rather than dressed up as a fragile PASS.
+
+- **Why the honest split matters.** Claims (a)/(b) isolate the effect the paper is really about -- the value of structural optimism on a shared candidate pool -- and they hold cleanly. Claim (c) is a cross-paradigm comparison (rejection sampler on a discrete pool vs. continuous evolutionary search) that is sensitive to the harness, and the harness here does not reproduce it. A replication study earns its keep precisely by drawing that line.
+"""),
+]
+
+
 def main():
     plan = [
         ("01_drone.ipynb", NB_01),
@@ -3653,6 +3806,7 @@ def main():
         ("22_online_feedback_codesign.ipynb", NB_22),
         ("23_formula1_season.ipynb", NB_23),
         ("24_car_catalog_codesign.ipynb", NB_24),
+        ("25_online_paper_benchmarks.ipynb", NB_25),
     ]
     for name, cells in plan:
         write(name, cells)

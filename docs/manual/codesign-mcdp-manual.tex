@@ -879,11 +879,11 @@ result = solve(drone, {"endurance":      300.0,
 print(result.status)         # "converged"
 print(result.iterations)     # e.g. 17
 print(result.feasible)       # True
-print(result.antichain)      # Antichain[(total_mass=0.56 kg)]
+print(result.antichain)      # Antichain[(total_mass=0.55 kg)]
 
 # Scalarise: cheapest design under a custom cost function
 best = minimize_cost(result, cost_fn=lambda r: r["total_mass"])
-print(best)                  # {"total_mass": 0.5602}
+print(best)                  # {"total_mass": 0.5492}
 \end{lstlisting}
 \end{example}
 
@@ -1051,12 +1051,14 @@ class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
 
-    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+    def __init__(self, specific_energy=2.0e6, efficiency=0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
 
     def h(self, f):
+        # nominal product 2.0e6 * 0.9 = 1.8 MJ/kg delivered,
+        # matching the canonical drone (examples 1/6/7)
         return {"mass": f["capacity"]
                        / (self.specific_energy * self.efficiency)}
 
@@ -1081,10 +1083,10 @@ directions declared, the worst case is a single corner read off in
 constant time:
 \begin{lstlisting}
 b.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
-# worst case = (specific_energy=1.6e6, efficiency=0.80)
+# worst case = (specific_energy=1.7e6, efficiency=0.83)
 \end{lstlisting}
 When some directions are undeclared, all $2^n$ endpoint combinations
 are evaluated and the worst is kept; cheap when $n$ is modest.
@@ -1096,7 +1098,7 @@ parameters, so an ellipsoid is a more honest model than a box when
 parameters are believed to vary together:
 \begin{lstlisting}
 b.uncertain_set = Ellipsoid(
-    center={"specific_energy": 1.8e6, "efficiency": 0.85},
+    center={"specific_energy": 2.0e6, "efficiency": 0.9},
     cov=[
         [1.0e10, -2.0e3],
         [-2.0e3,  2.5e-3],
@@ -1129,8 +1131,8 @@ from scipy import stats
 
 b.uncertain_dist = Stochastic(
     marginals={
-        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+        "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+        "efficiency":      stats.uniform(loc=0.83, scale=0.14),
     },
     copula=GaussianCopula(correlation=[[1.0, 0.4],
                                         [0.4, 1.0]]),
@@ -1196,14 +1198,14 @@ the corner where both parameters take their worst endpoint:
 \begin{lstlisting}
 bat = Battery()  # the Module subclass from example~7
 bat.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
 # ... wire `bat` into the drone system ...
 
 result = solve(drone, f, uncertainty=["worst_case"])
 worst_mass = list(result.worst_case.antichain.points)[0]["total_mass"]
-# worst_mass = 0.5760 kg, versus 0.5602 kg nominal
+# worst_mass = 0.5668 kg, versus 0.5492 kg nominal
 \end{lstlisting}
 \end{example}
 
@@ -1216,8 +1218,8 @@ from scipy import stats
 
 bat.uncertain_dist = Stochastic(
     marginals={
-        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+        "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+        "efficiency":      stats.uniform(loc=0.83, scale=0.14),
     },
     copula=GaussianCopula(correlation=[[1.0, 0.4],
                                         [0.4, 1.0]]),
@@ -1226,9 +1228,9 @@ bat.uncertain_dist = Stochastic(
 res = solve(drone, f,
             uncertainty=["mean", "p95", "cvar95", "samples"],
             n_samples=1000, rng_seed=42)
-# res.mean["total_mass"]    -> 0.5613 kg
-# res.p95["total_mass"]     -> 0.5729 kg
-# res.cvar95["total_mass"]  -> 0.5742 kg
+# res.mean["total_mass"]    -> 0.5506 kg
+# res.p95["total_mass"]     -> 0.5632 kg
+# res.cvar95["total_mass"]  -> 0.5647 kg
 # len(res.samples)          -> 1000
 \end{lstlisting}
 \end{example}
@@ -1280,12 +1282,39 @@ sensible $L$ the bound never prunes a Pareto-optimal candidate.
 
 \paragraph{Linear-parametric.}
 \texttt{LinearParametricEvaluator(features, r\_components,
-confidence=2.0, min\_obs=3)} fits a running OLS model
-$h_k(c) \approx a_k + b_k \cdot features(c)$ and bounds new queries
-by a confidence band of width \texttt{confidence} times the residual
-standard deviation. Fastest in practice. Risk: when the true
-relationship is nonlinear, the confidence band can be too tight and
-a Pareto-optimal candidate can be wrongly eliminated.
+min\_obs=3, prior\_box=None, noise\_bound=0.0, solver="highs")}
+implements the \emph{certified} optimistic bound of Alharbi \etal\
+(Section~V-C3, eqs.\ 26--28 and Lemma~V.5). It assumes each resource
+coordinate is an \emph{exact} affine function of the features,
+$\text{req}_k(c) = \phi(c)^\top \theta_k^*$ with
+$\phi(c) = [1, features(c)]$ (the paper's noiseless linear model).
+Rather than fit a single least-squares line, it maintains the whole
+\emph{confidence polytope} $\Theta(H)$ --- the subset of the prior
+box $\Theta_0$ consistent with every observation taken as a linear
+equality --- and returns, per resource coordinate, the coordinatewise
+minimum of the predicted resource over that polytope,
+$[\text{req}_\text{opt}(i, H)]_k =
+\min_{\theta \in \Theta(H)} \phi(i)^\top \theta$. Each such minimum is
+one linear program, solved with \texttt{scipy.optimize.linprog} (the
+\texttt{solver} kwarg selects the method). Because the true parameter
+$\theta_k^*$ is feasible for the LP, its optimum is always
+$\leq \phi(i)^\top \theta_k^* = \text{req}_k(i)$: the returned value is
+a \emph{guaranteed} lower bound (the optimism guarantee of
+Lemma~V.5), so --- unlike the former OLS $\pm$ confidence-band
+heuristic --- it can \emph{never} wrongly eliminate a Pareto-optimal
+candidate. No upper bound is certified, so the returned upper bound
+stays at $+\infty$. \texttt{prior\_box} sets $\Theta_0$ (a per-parameter
+box) to keep the LP bounded while the fit is under-determined:
+\texttt{None} leaves every parameter unbounded, which is always safe
+but yields the trivial bound until enough observations pin $\theta$
+down; \texttt{noise\_bound}${} > 0$ relaxes each observation equality
+into a two-sided band of that half-width, a documented extension for
+bounded observation noise. The old \texttt{confidence} kwarg is
+deprecated and ignored (passing it emits a
+\texttt{DeprecationWarning}). Net effect: this evaluator is both safe
+\emph{and} effective when the affine assumption genuinely holds, and
+degrades \emph{safely} --- to the no-information bound, never to a
+wrong elimination --- when it does not.
 
 \paragraph{Gaussian process.}
 \texttt{GaussianProcessEvaluator(features, r\_components,
@@ -1293,10 +1322,12 @@ length\_scale=0.3, sigma\_f=1.0, noise=1e-3, confidence=2.0,
 min\_obs=3)} fits a zero-mean GP with an RBF kernel and bounds new
 queries by a confidence band on the predictive standard deviation.
 Implemented in pure numpy. The right tool when the response surface
-has strong feature interactions or local nonlinearity that a
-linear regression misses. For nearly-additive surfaces the
-linear-parametric evaluator is empirically competitive and
-significantly faster.
+has feature interactions or local nonlinearity: the GP still produces
+informative (if uncertified) bounds there, whereas the certified
+linear-parametric evaluator correctly degrades to the no-information
+bound once the affine assumption fails. When the map \emph{is} affine,
+prefer the linear-parametric evaluator --- its bound is then both
+certified-safe and tight.
 
 \paragraph{Subclassing.} Custom evaluators only need to override
 \texttt{bound(candidate)}; the base class handles observation
@@ -1424,12 +1455,22 @@ the empirical observation standard deviation), \texttt{noise}
 (default $10^{-3}$ jitter), \texttt{confidence} (default $2.0\sigma$
 for roughly $95\%$ coverage), and \texttt{min\_obs} (default $3$).
 The GP is more expressive than the linear-parametric evaluator and
-captures local nonlinearity that a global linear fit misses. For
-nearly-additive response surfaces such as the example 16 bioprocess
-effect model the two are empirically close, with
-\texttt{LinearParametricEvaluator} preferred for its simplicity;
-GP is the right tool when the response has strong feature
-interactions or local peaks that linear regression cannot represent.
+captures local nonlinearity that a global linear fit misses. Since the
+linear-parametric evaluator became the certified confidence-polytope
+bound the two occupy clearly separated niches. The certified
+\texttt{LinearParametricEvaluator} is the tool of choice when the
+resource map is genuinely affine in the features: on the linear fleet
+catalogue of example 14 it recovers all five Pareto types (where the
+former OLS-band version wrongly dropped one). But the example 16
+bioprocess effect model is markedly nonlinear (temperature U-shapes,
+a power-law failure rate), and there the certified bound correctly
+refuses to over-claim --- it degrades to the no-information bound and
+recovers zero of the four Pareto classes rather than eliminate a
+candidate it cannot rule out. The GP, willing to extrapolate a smooth
+surrogate, stays informative on that same grid (recovering one of the
+four classes). Rule of thumb: certified linear-parametric when you
+trust the affine assumption (safe \emph{and} effective), GP when you
+do not.
 
 % ===========================================================================
 \section{Visualisation}
@@ -1568,7 +1609,7 @@ res = solve(drone, f,
             uncertainty=["mean", "p95", "cvar95", "samples"],
             n_samples=1000, rng_seed=42)
 ax = viz.plot_uncertainty(res, port="total_mass",
-                          nominal=0.5602, bins=30)
+                          nominal=0.5492, bins=30)
 \end{lstlisting}
 The function reads the requested summaries off the result and
 labels them automatically.
@@ -1959,13 +2000,16 @@ of the Kleene iteration to machine precision.
 \subsection{Example 11: set-based deterministic uncertainty}
 
 \texttt{11\_uncertain\_drone.py}. The drone's battery has two
-internal parameters (specific energy, efficiency) declared with
-"more is better" directions. First a \texttt{Box} with independent
-ranges, then a tilted \texttt{Ellipsoid} of the same widths. The
-worst-case mass under the box is +0.0158\,kg above nominal; under the
-ellipsoid it is +0.0050\,kg. The discrepancy is the cost of admitting
-the implausible corner where both parameters are simultaneously at
-their worst; the ellipsoid model rejects it explicitly.
+internal parameters (specific energy, efficiency) whose nominal
+product, 1.8\,MJ/kg delivered, reduces to the canonical drone of
+examples 1/6/7: the nominal solve converges to the same
+0.5492\,kg. Both are declared with "more is better" directions.
+First a \texttt{Box} with independent ranges, then a tilted
+\texttt{Ellipsoid}. The worst-case mass under the box is
++0.0176\,kg above nominal; under the ellipsoid it is +0.0035\,kg.
+The discrepancy is the cost of admitting the implausible corner
+where both parameters are simultaneously at their worst; the
+ellipsoid model rejects it explicitly.
 
 \subsection{Example 12: stochastic uncertainty with a Gaussian copula}
 
@@ -2010,9 +2054,12 @@ optimistic-evaluator bound. The example compares three flavours:
   \texttt{cost\_per\_capacity = unit\_cost / (speed * payload)}
   feature evaluates only 13 / 200 candidates and still recovers
   every Pareto point.
-\item Linear-parametric with a 3-sigma confidence band evaluates
-  roughly 35 / 200 candidates but wrongly eliminates one Pareto
-  point on this seed, illustrating the bias-variance tradeoff.
+\item Linear-parametric, now the certified confidence-polytope bound,
+  evaluates 122 / 200 candidates and provably recovers all five
+  Pareto points. The former OLS $\pm$ 3-sigma heuristic pruned much
+  more aggressively (about 35 / 200) but wrongly dropped one Pareto
+  point on this seed; the certified LP trades that aggressiveness for
+  a guarantee that it can never eliminate an optimal candidate.
 \end{itemize}
 The notebook visualises the elimination cascade in feature space
 with stars marking the true Pareto front.
@@ -2072,25 +2119,35 @@ The example compares two non-online baselines (a 75-run factorial
 DOE at the $\text{pH} = 7.1$ slice, and a 40-run uniform random
 sample at fixed seed) against the three online evaluators from
 \texttt{codesign.online} at a budget of 40 inner solves. At this
-budget the LinearParametric evaluator and the tuned Lipschitz
-evaluator both recover 3 of the 4 distinct Pareto classes, matching
-the 75-run factorial DOE at 53\% of the experimental cost. The
-Monotonicity evaluator alone is uninformative on this problem
-because its lower bounds tighten only for candidates above every
-observation in the partial order, and the picker has no observation
-at the low-feature corner where the Pareto front lives. The example
-flags this explicitly and discusses warm-start strategies. The
-companion notebook visualises the LinearParametric pick trajectory
-in the (temperature, glucose) projection, showing the exploration
-phase before \texttt{min\_obs} is reached and the concentration
-phase that follows.
+budget the tuned Lipschitz evaluator recovers 3 of the 4 distinct
+Pareto classes, matching the 75-run factorial DOE at 53\% of the
+experimental cost. The certified LinearParametric evaluator, by
+contrast, recovers \emph{zero} classes here --- and correctly so: this
+effect model is markedly nonlinear (temperature U-shapes, a power-law
+failure rate), so no single affine parameter set fits the observations,
+the confidence polytope cannot support a non-trivial bound, and the
+evaluator falls back to the no-information value rather than risk
+eliminating a candidate it cannot certify as suboptimal. This is the
+safe-degradation property in action: on example 14's genuinely linear
+catalogue the same evaluator recovers every Pareto point, whereas here
+it declines to guess. The Monotonicity evaluator alone is likewise
+uninformative, because its lower bounds tighten only for candidates
+above every observation in the partial order, and the picker has no
+observation at the low-feature corner where the Pareto front lives. The
+example flags both effects explicitly and discusses warm-start
+strategies. The companion notebook visualises the pick trajectory in
+the (temperature, glucose) projection.
 
 The take-home message generalises beyond bioprocess: the structural
-prior is doing the work, the budget is the cost. A predictive prior
-like LinearParametric, or a hybrid Gaussian-process-with-Lipschitz-
-tail, propagates information across the whole grid; pure local
-bounds (Lipschitz with conservative $L$, Monotonicity) need either
-denser observations or a warm-start.
+prior is doing the work, the budget is the cost, and the prior must
+match the problem. A global predictive prior propagates information
+across the whole grid only when its structural assumption holds --- the
+certified LinearParametric evaluator is exact and effective on an
+affine map (example 14) but deliberately silent on this nonlinear one,
+while a Gaussian process buys reach on smooth nonlinear surfaces at the
+price of an uncertified bound. Pure local bounds (Lipschitz with
+conservative $L$, Monotonicity) are always safe but need either denser
+observations or a warm-start to concentrate.
 
 \subsection{Example 17: full-vehicle co-design across ICE, hybrid, and EV}
 

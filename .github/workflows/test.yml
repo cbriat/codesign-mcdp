@@ -57,7 +57,8 @@ jobs:
             21_reconfigurable_robot \
             22_online_feedback_codesign \
             23_formula1_season \
-            24_car_catalog_codesign; do
+            24_car_catalog_codesign \
+            25_online_paper_benchmarks; do
             echo "=== examples.$m ==="
             python -m "examples.$m"
           done

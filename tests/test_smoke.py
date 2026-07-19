@@ -1,5 +1,6 @@
 """Quick smoke test verifying posets, antichains, and basic DPs."""
 import os
+import re
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -321,7 +322,7 @@ def test_uncertainty_box():
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
         R = {"mass":     Reals(unit="kg")}
-        def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        def __init__(self, specific_energy=2.0e6, efficiency=0.9):
             self.specific_energy = specific_energy
             self.efficiency = efficiency
             super().__init__()
@@ -336,8 +337,8 @@ def test_uncertainty_box():
 
     b = Battery()
     b.uncertain_set = Box(
-        specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-        efficiency=(0.80, 0.90, "more_is_better"),
+        specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+        efficiency=(0.83, 0.97, "more_is_better"),
     )
 
     sys = System("drone")
@@ -365,8 +366,8 @@ def test_uncertainty_box():
 
     # And the battery's parameters should have been restored to their
     # nominal values after the solve.
-    assert b.specific_energy == 1.8e6, b.specific_energy
-    assert b.efficiency == 0.85, b.efficiency
+    assert b.specific_energy == 2.0e6, b.specific_energy
+    assert b.efficiency == 0.9, b.efficiency
 
     print(f"nominal mass={nominal_mass:.4f} kg, worst-case mass={worst_mass:.4f} kg")
 
@@ -384,7 +385,7 @@ def test_uncertainty_stochastic():
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
         R = {"mass":     Reals(unit="kg")}
-        def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        def __init__(self, specific_energy=2.0e6, efficiency=0.9):
             self.specific_energy = specific_energy
             self.efficiency = efficiency
             super().__init__()
@@ -400,8 +401,8 @@ def test_uncertainty_stochastic():
     b = Battery()
     b.uncertain_dist = Stochastic(
         marginals={
-            "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-            "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+            "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+            "efficiency":      stats.uniform(loc=0.83, scale=0.14),
         },
         copula=GaussianCopula(correlation=[[1.0, 0.4], [0.4, 1.0]]),
     )
@@ -547,6 +548,40 @@ def test_viz_smoke():
     assert "battery" in dot and "actuator" in dot
     # cyclic-or-not, both modules should appear as nodes
     assert dot.count("[label=") >= 2
+
+    # Default-name output is unchanged: bare, unquoted "codesign" ID.
+    assert dot.startswith("digraph codesign {")
+
+    # Graph names with spaces, parens, or quotes must still yield valid dot.
+    def _parses_as_dot(src):
+        # Prefer a real parse via the graphviz python package or the dot
+        # binary; fall back to a structural check when neither is present.
+        try:
+            import graphviz
+            graphviz.Source(src).pipe(format="canon")
+            return True
+        except ImportError:
+            pass
+        except Exception:
+            return False
+        import shutil
+        import subprocess
+        if shutil.which("dot"):
+            p = subprocess.run(["dot", "-Tcanon"], input=src,
+                               capture_output=True, text=True)
+            return p.returncode == 0
+        # Structural fallback: first line is `digraph <id> {`, braces balance.
+        first = src.splitlines()[0]
+        ok_first = bool(re.match(
+            r'^digraph (?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"\\]|\\.)*") \{$', first))
+        return ok_first and src.count("{") == src.count("}")
+
+    for weird in ('my drone (v2)', 'a "quoted" name', "spaces and (parens)"):
+        wdot = viz.to_dot(drone, name=weird)
+        first = wdot.splitlines()[0]
+        # Non-identifier names must be double-quoted.
+        assert first.startswith('digraph "') and first.endswith(" {")
+        assert _parses_as_dot(wdot), f"invalid dot for name={weird!r}"
 
     # plot functions should at least import matplotlib lazily; we skip if
     # it isn't available, so the test passes on minimal installations.
