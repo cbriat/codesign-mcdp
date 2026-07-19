@@ -253,6 +253,8 @@ payload), the iteration drives the loop variable to ⊤ and the result reports
 * `21_reconfigurable_robot.py` – vector-state co-design for a self-reconfiguring robot: a field robot reconfigures between tracked, wheeled, and hybrid morphologies across mission legs, carrying a full three-axis state vector (per-module wear for two drive modules plus a shared energy budget). The dynamic program spreads wear across the modules so none hits its limit and forces an expensive fallback. Demonstrates the general vector-state carried state, the structured multi-component state of the Formula 1 seasonal problem.
 * `22_online_feedback_codesign.py` – online feedback co-design of an adaptive sensor node: a solar-powered node senses its battery charge, reads the live data-rate requirement and solar conditions, re-solves its co-design at those conditions, and applies the cheapest feasible configuration, each step, in closed loop. A storm raises the demand mid-run and the node escalates to a high-rate configuration, then falls back as measured charge drops and recovers as solar returns. The plan is never trusted to match reality; each step is solved against the measured state.
 * `23_formula1_season.py` – hierarchical co-design for a Formula 1 season, a faithful reproduction of Neumann, Zardini et al. (ITSC 2026) in the framework's vocabulary, and the canonical *precompute-then-DP* structure. Layer 1 solves the race-level co-design once per (track, battery, incoming-age) into a frozen Pareto catalog of `(race_time, wear)` via a `CatalogDP` and `precompute_catalog`. Layer 2 is a season-level scalar-maximisation MDP carrying the `(w1, w2, ex)` state (two battery-unit wear levels plus a replacement-penalty flag), selecting per race which unit to run, which deployment implementation to pick, and whether to replace, to maximise expected championship points against the FIA table. Reproduces the paper's two findings (a local grid penalty accepted for a global points gain, and a race-order-dependent optimal policy). The season DP is validated against brute force in the tests.
+* `24_car_catalog_codesign.py` – catalog-driven vehicle co-design in which a single 12-row architecture table (ICE, MHEV, FHEV, PHEV, REEV, BEV) drives 22 subsystems: each row pre-selects the discrete powertrain choices as `CatalogDP` entries while the parametric modules size themselves from mission demand. One table plus one `build_architecture()` replaces the three hand-wired builders of example 17; the mass and battery-energy spirals close by Kleene iteration.
+* `25_online_paper_benchmarks.py` – replicates the synthetic benchmarks of Alharbi, Dahleh and Zardini, *Compositional Online Learning for Multi-Objective System Co-Design* (arXiv:2604.22624): the rejection-sampler-with-optimistic-evaluators loop (Algorithm 1) recovers the target-feasible antichain with a fraction of the exhaustive evaluations.
 
 Run any of them with `python -m examples.NN_name`. The visualization example
 also needs matplotlib (`pip install matplotlib`).
@@ -279,11 +281,12 @@ Three further layers generalise the carried state, match a cheaper published str
 
 ## Documentation
 
-A full reference manual is provided as both LaTeX source and a pre-built PDF
-under [`docs/manual/`](docs/manual/). It covers the mathematical background
-from Censi (2015), every data type and primitive, both builders, the solver,
-worked examples, and modelling guidelines. Rebuild from source with
-`make` in that directory if you have LaTeX installed.
+A full reference manual (a 113-page PDF) is provided as both LaTeX source and
+a pre-built PDF under [`docs/manual/`](docs/manual/). It covers the
+mathematical background from Censi (2015), every data type and primitive, both
+builders, the solver, a per-module API reference for every public symbol, all
+25 worked examples, and modelling guidelines. Rebuild from source with `make`
+in that directory if you have LaTeX installed.
 
 The notebook companion to each example is under
 [`notebooks/`](notebooks/README.md), with outputs and figures pre-rendered so
@@ -573,6 +576,25 @@ multi-subsystem designs. It does **not** ship:
 These are tractable extensions on top of the current core. (Design-graph
 visualisation, once absent, is now provided by `codesign.diagram`; see the
 block-diagram section above.)
+
+## Citing
+
+If you use codesign-mcdp in academic work, please cite it. A machine-readable
+[`CITATION.cff`](CITATION.cff) is included at the repository root, so GitHub's
+"Cite this repository" button (top of the repo page) generates a citation
+automatically. In BibTeX:
+
+```bibtex
+@software{briat_codesign_mcdp,
+  author  = {Briat, Corentin},
+  title   = {codesign-mcdp: A Python Library for Monotone Co-Design Problems},
+  year    = {2026},
+  version = {0.2.0},
+  url     = {https://github.com/cbriat/codesign-mcdp}
+}
+```
+
+Please also cite the underlying theory, Censi (2015) (see References below).
 
 ## License
 

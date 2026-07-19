@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: codesign-mcdp
+type: software
+authors:
+  - family-names: Briat
+    given-names: Corentin
+    email: corentin@briat.info
+version: 0.2.0
+date-released: "2026-07-19"
+repository-code: "https://github.com/cbriat/codesign-mcdp"
+license: MIT
+keywords:
+  - co-design
+  - mcdp
+  - pareto
+  - fixed-point
+  - poset
+  - monotone
+references:
+  - type: article
+    title: "A Mathematical Theory of Co-Design"
+    authors:
+      - family-names: Censi
+        given-names: Andrea
+    year: 2015
+    url: "https://arxiv.org/abs/1512.08055"
+    identifiers:
+      - type: other
+        value: "arXiv:1512.08055"
+    notes: "The underlying mathematical theory implemented by this software."
