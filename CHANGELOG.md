@@ -492,5 +492,5 @@ Initial release.
   (`codesign-mcdp-manual.pdf`) committed alongside the LaTeX source.
   Rebuilt with `make` in that directory.
 
-[Unreleased]: https://github.com/corentinbriat/codesign-mcdp/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/corentinbriat/codesign-mcdp/releases/tag/v0.1.0
+[Unreleased]: https://github.com/cbriat/codesign-mcdp/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/cbriat/codesign-mcdp/releases/tag/v0.1.0

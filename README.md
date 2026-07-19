@@ -1,6 +1,6 @@
 # codesign-mcdp
 
-[![tests](https://github.com/corentinbriat/codesign-mcdp/actions/workflows/test.yml/badge.svg)](https://github.com/corentinbriat/codesign-mcdp/actions/workflows/test.yml)
+[![tests](https://github.com/cbriat/codesign-mcdp/actions/workflows/test.yml/badge.svg)](https://github.com/cbriat/codesign-mcdp/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -35,13 +35,13 @@ stochastic layers).
 Install the latest version directly from Git:
 
 ```bash
-pip install git+https://github.com/corentinbriat/codesign-mcdp.git
+pip install git+https://github.com/cbriat/codesign-mcdp.git
 ```
 
 Or clone and install in editable mode for development:
 
 ```bash
-git clone https://github.com/corentinbriat/codesign-mcdp.git
+git clone https://github.com/cbriat/codesign-mcdp.git
 cd codesign-mcdp
 pip install -e ".[dev]"      # everything: tests, plots, diagrams, notebooks
 ```
