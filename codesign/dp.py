@@ -223,6 +223,14 @@ class ODE_DP(DesignProblem):
     The user supplies dx/dt = rhs(x, t, f) along with a method for extracting
     the resource(s) from the trajectory: either ``steady_state`` (fixed point
     of rhs) or ``final_value`` (integrate to t_end and read off x).
+
+    The integrated state ``x`` (as produced by ``x0_fn``) must be a scalar or
+    a positional sequence of floats: the integrator either does scalar
+    arithmetic on it or zips it component-wise. A *named* (dict-valued) state
+    is rejected with a clear :class:`TypeError` the first time it enters the
+    integrator, rather than being allowed to fail cryptically deep inside
+    :meth:`_simulate` / :meth:`_steady_state`; map named state variables onto
+    a list and index them positionally in ``rhs``/``extract``.
     """
 
     def __init__(
@@ -247,8 +255,35 @@ class ODE_DP(DesignProblem):
         self.x0_fn = x0_fn or (lambda f: 0.0)
         self.name = name
 
-    def _simulate(self, f) -> Any:
+    def _initial_state(self, f) -> Any:
+        """Build and validate the initial state ``x0_fn(f)``.
+
+        The integrator only supports a scalar state or a positional sequence
+        of floats. A dict-valued (named) state is the common mistake, so it is
+        rejected here -- the earliest point the state enters -- with a message
+        that names the offending keys and shows how to switch to a list.
+        """
         x = self.x0_fn(f)
+        if isinstance(x, dict):
+            raise TypeError(
+                f"ODE_DP {self.name!r} state must be a float or a sequence of "
+                f"floats, got a dict with keys {sorted(x.keys())}. ODE_DP "
+                f"integrates a scalar or a positional vector state; it cannot "
+                f"index a mapping. Map named state variables onto a list, e.g. "
+                f"x0_fn=lambda f: [temp, pressure], and index them positionally "
+                f"in your rhs (dx/dt) and extract functions "
+                f"(x[0] is temp, x[1] is pressure)."
+            )
+        if isinstance(x, (str, bytes)):
+            raise TypeError(
+                f"ODE_DP {self.name!r} state must be a float or a sequence of "
+                f"floats, got {type(x).__name__} ({x!r}). Return a scalar "
+                f"(e.g. x0_fn=lambda f: 0.0) or a list/tuple of floats."
+            )
+        return x
+
+    def _simulate(self, f) -> Any:
+        x = self._initial_state(f)
         dt = self.t_end / self.n_steps
         t = 0.0
         for _ in range(self.n_steps):
@@ -261,7 +296,7 @@ class ODE_DP(DesignProblem):
         return x
 
     def _steady_state(self, f) -> Any:
-        x = self.x0_fn(f)
+        x = self._initial_state(f)
         for _ in range(64):
             r = self.rhs(x, 0.0, f)
             if abs(r) < 1e-9:

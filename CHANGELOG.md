@@ -407,6 +407,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks all points. Existing examples and tests are unaffected (their
   cost-dominated points had identical successors); the reconfigurable-robot
   example is feasible only with the fix.
+- **Early validation of the `ODE_DP` integrator state** (`codesign/dp.py`).
+  A dict-valued (named) state used to fail cryptically deep inside
+  `_simulate`/`_steady_state` with `TypeError: bad operand type for abs():
+  'dict'`. `ODE_DP` now validates the initial state the first time it enters
+  the integrator and raises a clear `TypeError` naming the offending keys and
+  showing how to switch to a positional list (`str`/`bytes` states are
+  rejected likewise). Scalar and list/tuple vector states are unaffected.
+- **Clearer `MCDP.loop_on` diagnostics** (`codesign/mcdpl.py`). Looping on an
+  axis that is not declared on both sides now raises a `ValueError` that
+  states the both-sides requirement, interpolates the current `provides()`/
+  `requires()` declarations, and points to the `report_mass` mirror pattern
+  (`examples/06`) for keeping a projected-out axis visible. Behaviour is
+  otherwise unchanged.
+- **Upfront interface check in `Series`** (`codesign/composition.py`).
+  Composing `Series(dp1, dp2)` where `dp2` requires a functionality port that
+  `dp1` does not produce used to fail much later with a bare `KeyError` during
+  solve. `Series.__init__` now checks `set(dp2.F.keys()) <= set(dp1.R.keys())`
+  (when both interfaces are `Ports`) and raises a `ValueError` naming the
+  missing ports on each side. Extra `dp1` resource ports not consumed by `dp2`
+  remain permitted (the check is a subset, not an equality), matching what
+  `h()` actually requires; scalar (non-`Ports`) compositions are unaffected.
 
 ## [0.1.0] - 2026-05-18
 

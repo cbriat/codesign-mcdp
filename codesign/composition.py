@@ -32,9 +32,36 @@ class Series(DesignProblem):
     The relation is:
         h(f) = Min { h2(f2) : exists r1 in h1(f), r1 <= f2 }
     which simplifies (when h2 is monotone) to h(f) = Min(up(h2(h1(f)))).
+
+    Each resource point produced by ``dp1`` is fed straight in as a
+    functionality of ``dp2``, so every port ``dp2`` requires must be produced
+    by ``dp1``: ``set(dp2.F.keys()) <= set(dp1.R.keys())`` when both interfaces
+    are :class:`~codesign.posets.Ports`. This is checked upfront in
+    :meth:`__init__` -- a mismatch raises a :class:`ValueError` naming the
+    missing ports, rather than surfacing as a bare ``KeyError`` deep inside a
+    later solve. Extra resource ports on ``dp1`` (not consumed by ``dp2``) are
+    permitted: :meth:`h` simply ignores them, so the check is a subset, not an
+    equality.
     """
 
     def __init__(self, dp1: DesignProblem, dp2: DesignProblem, name: str | None = None):
+        if isinstance(dp1.R, Ports) and isinstance(dp2.F, Ports):
+            r1_keys = set(dp1.R.keys())
+            f2_keys = set(dp2.F.keys())
+            missing = f2_keys - r1_keys
+            if missing:
+                raise ValueError(
+                    f"Series({dp1.name!r}, {dp2.name!r}): interface mismatch. "
+                    f"The connection feeds {dp1.name!r}'s resource ports in as "
+                    f"{dp2.name!r}'s functionality, so every port {dp2.name!r} "
+                    f"requires must be produced by {dp1.name!r}. "
+                    f"{dp2.name!r} consumes functionality ports "
+                    f"{sorted(f2_keys)} but {dp1.name!r} produces resource ports "
+                    f"{sorted(r1_keys)}; missing on the resource side: "
+                    f"{sorted(missing)}. Either add {sorted(missing)} to "
+                    f"{dp1.name!r}'s R, or rename {dp2.name!r}'s F ports to "
+                    f"match {dp1.name!r}'s R ports."
+                )
         self.dp1 = dp1
         self.dp2 = dp2
         self.F = dp1.F
