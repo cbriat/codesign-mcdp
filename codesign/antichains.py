@@ -113,7 +113,7 @@ class Antichain:
         return True
 
     # ------------------------------------------------------------------ #
-    # Min and upper-closure-flavored operations
+    # Min and upper-closure-flavoured operations
     # ------------------------------------------------------------------ #
 
     @classmethod
@@ -139,7 +139,7 @@ class Antichain:
         return Antichain(self.poset, kept)
 
     def has_any_top(self) -> bool:
-        """True if any point in the antichain hit the top (infeasibility)."""
+        """True if any point in the antichain hits the top (infeasibility)."""
         any_top = getattr(self.poset, "any_top", None)
         if any_top is not None:
             return any(any_top(p) for p in self._points)

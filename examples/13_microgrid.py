@@ -26,6 +26,12 @@ Features the package now offers come together in this example:
 
 The visualisation module is used at the end to render the convergence
 trace, the MC distribution of total cost, and the system structure.
+
+Running this script prints the chemistry comparison, the warm-start
+speedup, and the stochastic robustness summary, then writes three
+files to ``outputs/``: ``microgrid_convergence.png``,
+``microgrid_uncertainty.png``, and ``microgrid.dot`` (Graphviz source
+for the system diagram).
 """
 from __future__ import annotations
 
@@ -330,7 +336,8 @@ def main():
 
     ax = viz.plot_uncertainty(res, "total_cost_usd",
                               nominal=nominal_cost,
-                              title="MC distribution of total cost (LFP)")
+                              title="MC distribution of total cost (LFP)",
+                              xlabel="total cost (USD)")
     plt.tight_layout()
     unc_path = os.path.join(out_dir, "microgrid_uncertainty.png")
     plt.savefig(unc_path, dpi=110)

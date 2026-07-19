@@ -10,6 +10,11 @@ mathematical inequalities they represent.
 Equivalent to the lambda-based ``sys.constrain(target, lambda x: ...)``
 form. Both styles compile to the same internal constraint list and
 produce identical results.
+
+Run:  python -m examples.07_drone_modular
+Expected output: the System wiring summary, the compiled DP signature, and
+one block per mission with the Kleene iteration count, feasibility, and
+converged total mass.
 """
 from __future__ import annotations
 

@@ -110,14 +110,38 @@ class MCDP:
 
     def loop_on(self, axis: str) -> "MCDP":
         """Close a feedback loop on a name that appears in both provides
-        and requires. The axis is projected out of the final F/R."""
+        and requires. The axis is projected out of the final F/R.
+
+        The axis must be declared on *both* sides: with :meth:`provides` (as
+        the fed-back functionality) and with :meth:`requires` (as the produced
+        resource). If either side is missing, a :class:`ValueError` naming the
+        missing side and the current declarations is raised. Because the axis
+        is projected out of the closed loop's F/R, mirror it into a separate
+        resource if you still want its value reported (see the ``report_mass``
+        mirror in ``examples/06``)."""
         if axis not in self._provides:
             raise ValueError(
-                f"loop axis '{axis}' must be in provides() before loop_on()"
+                f"loop_on({axis!r}) needs {axis!r} declared with provides() "
+                f"too. A loop closes a feedback axis that must appear on BOTH "
+                f"sides: provides() (the fed-back functionality) and requires() "
+                f"(the produced resource). Currently provides() = "
+                f"{sorted(self._provides)} and requires() = "
+                f"{sorted(self._requires)}. Add m.provides({axis!r}, unit=...) "
+                f"before calling loop_on({axis!r})."
             )
         if axis not in self._requires:
             raise ValueError(
-                f"loop axis '{axis}' must be in requires() before loop_on()"
+                f"loop_on({axis!r}) needs {axis!r} declared with requires() "
+                f"too. A loop closes a feedback axis that must appear on BOTH "
+                f"sides: provides() (the fed-back functionality) and requires() "
+                f"(the produced resource). Currently provides() = "
+                f"{sorted(self._provides)} and requires() = "
+                f"{sorted(self._requires)}. Add m.requires({axis!r}, unit=...) "
+                f"before calling loop_on({axis!r}). Note loop_on() projects "
+                f"{axis!r} out of the closed loop's F/R; if you still want its "
+                f"value reported, mirror it into a separate resource "
+                f"(a requires()/constraint() pair, like the ``report_mass`` "
+                f"mirror in examples/06)."
             )
         self._loops.append(axis)
         return self
@@ -127,9 +151,17 @@ class MCDP:
     def build(self) -> DesignProblem:
         """Produce a plain DesignProblem (with all declared loops closed)."""
         if not self._provides:
-            raise ValueError("at least one provides() is required")
+            raise ValueError(
+                f"MCDP {self.name!r}: at least one provides() is required "
+                f"before build(). A design problem needs a functionality "
+                f"space. Declare one with m.provides('name', unit=...)."
+            )
         if not self._requires:
-            raise ValueError("at least one requires() is required")
+            raise ValueError(
+                f"MCDP {self.name!r}: at least one requires() is required "
+                f"before build(). A design problem needs a resource space. "
+                f"Declare one with m.requires('name', unit=...)."
+            )
 
         F = Ports(dict(self._provides))
         R = Ports(dict(self._requires))
@@ -143,8 +175,11 @@ class MCDP:
             missing = set(self._requires) - set(self._constraints)
             if missing:
                 raise ValueError(
-                    f"resources {sorted(missing)} declared via requires() "
-                    "have no constraint() or rule() defining them"
+                    f"MCDP {self.name!r}: resource port(s) {sorted(missing)} "
+                    f"declared via requires() have no constraint() or rule() "
+                    f"defining them. Every resource needs an equation. Add "
+                    f"m.constraint({sorted(missing)[0]!r}, lambda f: ...) for "
+                    f"each, or supply a full m.rule(...)."
                 )
             inner = AlgebraicDP(
                 F=F, R=R,

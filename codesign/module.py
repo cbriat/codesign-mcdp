@@ -54,8 +54,8 @@ from .dp import DesignProblem
 from .posets import Ports, Poset
 
 
-# Module sentinel: the class attributes F and R are dicts (not Portss).
-# The instance attributes (set in __init__) shadow them with Portss.
+# Module sentinel: the class attributes F and R are dicts (not Ports instances).
+# The instance attributes (set in __init__) shadow them with Ports instances.
 
 
 class Module(DesignProblem):

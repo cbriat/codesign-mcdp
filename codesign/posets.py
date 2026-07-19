@@ -24,7 +24,7 @@ modelling need:
   recursively named) posets into a typed dict-like schema. Every design
   problem's F and R is a :class:`Ports`.
 - :class:`Discrete` is a finite poset over an explicit element list with
-  user-supplied ordering, useful for catalogue choice or enumerated states.
+  user-supplied ordering, useful for catalog choice or enumerated states.
 
 A backward-compatible alias ``NamedProduct = Ports`` is exported from the
 package; existing code using ``NamedProduct`` continues to work unchanged.
@@ -231,7 +231,11 @@ class Ports(Poset):
 
     def __init__(self, components: Mapping[str, Poset]):
         if not components:
-            raise ValueError("Ports requires at least one component")
+            raise ValueError(
+                "Ports requires at least one component, got an empty mapping. "
+                "Pass a non-empty {name: poset} dict, e.g. "
+                "Ports({'mass': Reals(unit='kg')})."
+            )
         # Copy into a fresh dict so later caller-side mutation of the
         # argument cannot corrupt this Ports instance.
         self.components: dict[str, Poset] = dict(components)
@@ -292,10 +296,18 @@ class Ports(Poset):
         """
         missing = set(self.components) - set(kwargs)
         if missing:
-            raise ValueError(f"missing components: {missing}")
+            raise ValueError(
+                f"Ports.make is missing component(s) {sorted(missing)}. This "
+                f"Ports declares {sorted(self.components)}; supply a value for "
+                f"every one. Add {sorted(missing)} to the keyword arguments."
+            )
         extra = set(kwargs) - set(self.components)
         if extra:
-            raise ValueError(f"unknown components: {extra}")
+            raise ValueError(
+                f"Ports.make got unknown component(s) {sorted(extra)}. This "
+                f"Ports declares {sorted(self.components)}; only those keys are "
+                f"accepted. Remove {sorted(extra)} or correct the name(s)."
+            )
         return dict(kwargs)
 
 
@@ -334,7 +346,17 @@ class Discrete(Poset):
         return self._leq(a, b)
 
     def bottom(self):
-        raise ValueError("Discrete poset has no canonical bottom; provide one")
+        raise ValueError(
+            f"Discrete poset {self.name!r} has no canonical bottom element. A "
+            f"discrete order over {len(self.elements)} element(s) has no least "
+            f"element in general; subclass Discrete and override bottom(), or "
+            f"wrap it in a poset that adds an explicit bottom."
+        )
 
     def top(self):
-        raise ValueError("Discrete poset has no canonical top; provide one")
+        raise ValueError(
+            f"Discrete poset {self.name!r} has no canonical top element. A "
+            f"discrete order over {len(self.elements)} element(s) has no "
+            f"greatest element in general; subclass Discrete and override "
+            f"top(), or wrap it in a poset that adds an explicit top."
+        )

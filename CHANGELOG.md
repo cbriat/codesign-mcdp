@@ -59,19 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests: `tests/test_vector_online.py` (11 tests) covering the vector grid
   primitives, the vector DP and its scalar-equivalence, the precompute-then-DP
   equivalence, and the online loop's feedback behaviour.
-
-### Fixed
-- **Correctness fix in the antichain-valued backward pass** (`sequential.py`
-  and `vector_dp.py`). The pass previously iterated the cost-Pareto-reduced
-  stage antichain before applying the carried-state transition, which could
-  discard a cost-dominated point that was the only feasible choice from a
-  constrained carried state (for example a higher-cost morphology that spares
-  a worn module). The pass now enumerates all solved points and lets
-  `union_min` prune only *after* the transition. `detect_resets` similarly now
-  checks all points. Existing examples and tests are unaffected (their
-  cost-dominated points had identical successors); the reconfigurable-robot
-  example is feasible only with the fix.
-
 - **Antichain-valued sequential co-design** (`codesign/sequential.py`,
   `examples/20_sequential_codesign.py`, `tests/test_sequential.py`). The
   multi-objective generalisation of the scalar `dynamic` layer: the value
@@ -253,20 +240,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   COGS, larger footprint) vs CHO-MK (smaller footprint, higher
   licence fee) tradeoff.
 
-### Changed
-- **Renamed `NamedProduct` to `Ports`** to match the library's everyday
-  vocabulary (port handles, outer F port, module R port, the operator
-  DSL is built on port handles). The old name is retained as a
-  backward-compatible alias (`NamedProduct = Ports`), so existing code
-  importing `NamedProduct` continues to work. All internal modules,
-  examples, notebooks, and documentation have been migrated to the new
-  name; the LaTeX manual now uses `Ports` throughout and explains the
-  alias.
-- Module-level docstrings in `codesign/posets.py` expanded with worked
-  rationale for each class and a clearer summary at the top.
-
-### Added
-
 #### Online learning (compositional, elimination-based)
 - New `codesign.online` module implementing the optimistic-evaluator
   solver from Alharbi, Dahleh & Zardini (arXiv:2604.22624).
@@ -407,11 +380,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   solver and other inspection tools.
 
 ### Changed
+- **Renamed `NamedProduct` to `Ports`** to match the library's everyday
+  vocabulary (port handles, outer F port, module R port, the operator
+  DSL is built on port handles). The old name is retained as a
+  backward-compatible alias (`NamedProduct = Ports`), so existing code
+  importing `NamedProduct` continues to work. All internal modules,
+  examples, notebooks, and documentation have been migrated to the new
+  name; the LaTeX manual now uses `Ports` throughout and explains the
+  alias.
+- Module-level docstrings in `codesign/posets.py` expanded with worked
+  rationale for each class and a clearer summary at the top.
 - `SolveResult.trace` is now `None` when tracing is disabled (instead of
   an empty list), so missing traces are distinguishable from empty ones.
   The default behaviour is unchanged: with no flags, `trace` is `None`.
 - `solve` and `kleene_loop` now use keyword-only arguments for the new
   observability and uncertainty options, to avoid call-site ambiguity.
+
+### Fixed
+- **Correctness fix in the antichain-valued backward pass** (`sequential.py`
+  and `vector_dp.py`). The pass previously iterated the cost-Pareto-reduced
+  stage antichain before applying the carried-state transition, which could
+  discard a cost-dominated point that was the only feasible choice from a
+  constrained carried state (for example a higher-cost morphology that spares
+  a worn module). The pass now enumerates all solved points and lets
+  `union_min` prune only *after* the transition. `detect_resets` similarly now
+  checks all points. Existing examples and tests are unaffected (their
+  cost-dominated points had identical successors); the reconfigurable-robot
+  example is feasible only with the fix.
+- **Early validation of the `ODE_DP` integrator state** (`codesign/dp.py`).
+  A dict-valued (named) state used to fail cryptically deep inside
+  `_simulate`/`_steady_state` with `TypeError: bad operand type for abs():
+  'dict'`. `ODE_DP` now validates the initial state the first time it enters
+  the integrator and raises a clear `TypeError` naming the offending keys and
+  showing how to switch to a positional list (`str`/`bytes` states are
+  rejected likewise). Scalar and list/tuple vector states are unaffected.
+- **Clearer `MCDP.loop_on` diagnostics** (`codesign/mcdpl.py`). Looping on an
+  axis that is not declared on both sides now raises a `ValueError` that
+  states the both-sides requirement, interpolates the current `provides()`/
+  `requires()` declarations, and points to the `report_mass` mirror pattern
+  (`examples/06`) for keeping a projected-out axis visible. Behaviour is
+  otherwise unchanged.
+- **Upfront interface check in `Series`** (`codesign/composition.py`).
+  Composing `Series(dp1, dp2)` where `dp2` requires a functionality port that
+  `dp1` does not produce used to fail much later with a bare `KeyError` during
+  solve. `Series.__init__` now checks `set(dp2.F.keys()) <= set(dp1.R.keys())`
+  (when both interfaces are `Ports`) and raises a `ValueError` naming the
+  missing ports on each side. Extra `dp1` resource ports not consumed by `dp2`
+  remain permitted (the check is a subset, not an equality), matching what
+  `h()` actually requires; scalar (non-`Ports`) compositions are unaffected.
+- **Error-message quality audit across `codesign/`.** Every user-reachable
+  `raise` was reviewed against the what/expected/how bar and upgraded to state
+  the failure, interpolate the offending name/value/type, and give a concrete
+  fix, with the correct exception type. `ODE_DP` now also rejects an invalid
+  `mode` at construction (`ValueError` listing `'final_value'`/`'steady_state'`)
+  instead of silently falling back to `final_value`. Covers `AlgebraicDP`,
+  `CatalogDP`, `UncertainDP`, `Parallel`/`Loop` composition, `MCDP.build`,
+  `Ports`/`Discrete`, `StateGrid` and the state axes, the `System` builder, the
+  stage/epoch "no candidates" family, the uncertainty sets/copulas, the online
+  picker resolver, and the `viz` helpers. Message-content regression tests added
+  in `tests/test_validation.py`.
 
 ## [0.1.0] - 2026-05-18
 
@@ -464,3 +491,6 @@ Initial release.
   every worked example, and modelling guidelines. Pre-built PDF
   (`codesign-mcdp-manual.pdf`) committed alongside the LaTeX source.
   Rebuilt with `make` in that directory.
+
+[Unreleased]: https://github.com/cbriat/codesign-mcdp/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/cbriat/codesign-mcdp/releases/tag/v0.1.0

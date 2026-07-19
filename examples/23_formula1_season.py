@@ -51,20 +51,17 @@ induction over the frozen catalogs, written out explicitly here because it
 maximises a scalar expected reward rather than minimising a resource
 antichain.
 
-Run directly to precompute the race catalogs, solve the season, print the
-optimal policy and expected points, and check the two headline findings:
-accepting a local penalty for a global gain, and race-order invariance of
-the attainable total reward with an order-dependent optimal policy.
+Run:  python -m examples.23_formula1_season
+Expected output: the precomputed race Pareto fronts, the optimal per-race
+policy and expected season points, the two headline findings (local penalty
+for global gain; race-order invariance of the total with an order-dependent
+policy), and three saved paper-analogue figures (f1_paper_fig1-3_*.png).
 """
 
 from __future__ import annotations
 
-import os
-import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     Architecture,

@@ -5,7 +5,7 @@ Two regimes are supported.
 
 **Set-based, deterministic.** Each uncertain parameter (or correlated bundle
 of parameters) lives in a known set: a :class:`Box` (axis-aligned interval
-product), a :class:`Disk` or :class:`Circle` (2-D conveniences), or an
+product), a :func:`Disk` or :func:`Circle` (2-D conveniences), or an
 :class:`Ellipsoid` (n-D). The worst-case antichain over the set is computed
 analytically when "direction of badness" is declared, by boundary sampling
 otherwise.
@@ -181,7 +181,11 @@ class Box(UncertaintySet):
                     f"(lo, hi, direction), got {val!r}"
                 )
             if lo > hi:
-                raise ValueError(f"Box parameter {name!r}: lo > hi")
+                raise ValueError(
+                    f"Box parameter {name!r} has lo > hi (lo={lo}, hi={hi}); "
+                    f"the interval is empty. Pass (lo, hi) with lo <= hi, e.g. "
+                    f"({hi}, {lo}) if the bounds were swapped."
+                )
             self._specs[name] = _ParamSpec(name, float(lo), float(hi), direction)
 
     def param_names(self) -> List[str]:
@@ -366,7 +370,11 @@ def Disk(center: Mapping[str, float], radius: float,
     if params is None:
         params = list(center.keys())
     if len(params) != 2:
-        raise ValueError("Disk requires exactly 2 parameters.")
+        raise ValueError(
+            f"Disk requires exactly 2 parameters, got {len(params)} "
+            f"({list(params)}). A Disk is a 2-D set; pass a 2-element params "
+            f"list or a 2-key center dict."
+        )
     np = _import_numpy_or_die()
     cov = (radius ** 2) * np.eye(2)
     return Ellipsoid(center, cov, params, directions)
@@ -428,7 +436,11 @@ class GaussianCopula(Copula):
         np = _import_numpy_or_die()
         R = np.asarray(correlation, dtype=float)
         if R.shape[0] != R.shape[1]:
-            raise ValueError("correlation must be square")
+            raise ValueError(
+                f"GaussianCopula correlation must be a square matrix, got "
+                f"shape {R.shape}. Pass a (d, d) symmetric positive-definite "
+                f"matrix with unit diagonal."
+            )
         # Cholesky for sampling.
         try:
             self._L = np.linalg.cholesky(R)
@@ -482,7 +494,11 @@ class Stochastic:
         if marginals_kw:
             marginals = {**marginals, **marginals_kw}
         if not marginals:
-            raise ValueError("Stochastic requires at least one marginal.")
+            raise ValueError(
+                "Stochastic requires at least one marginal, got none. Pass "
+                "marginals={'name': scipy_dist, ...} (or name=dist keyword "
+                "arguments)."
+            )
         self.marginals: Dict[str, Any] = dict(marginals)
         self.copula: Copula = copula if copula is not None else Independence()
 
@@ -625,7 +641,7 @@ def solve_with_uncertainty(
 ):
     """Run an uncertainty-aware solve and return an :class:`UncertaintyResult`.
 
-    See :func:`codesign.solver.solve` for parameter docs.
+    See :func:`~codesign.solver.solve` for parameter docs.
     """
     from .solver import solve  # avoid circular import
 

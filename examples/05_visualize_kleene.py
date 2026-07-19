@@ -67,7 +67,8 @@ def plot_trace(c_value: int, out_path: str):
         ax.set_yticks(range(0, bound + 1, max(1, bound // 6)))
         ax.grid(True, linestyle=":", alpha=0.5)
         ax.set_aspect("equal")
-        ax.set_title(f"$S_{{{k}}}$  ({len(A.points)} pts)")
+        npts = len(A.points)
+        ax.set_title(f"$S_{{{k}}}$  ({npts} pt{'s' if npts != 1 else ''})")
         ax.set_xlabel("x")
         ax.set_ylabel("y")
 

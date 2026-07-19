@@ -65,3 +65,6 @@ ENV/
 /outputs/
 *.png
 !docs/images/*.png
+
+# graphify knowledge-graph output
+graphify-out/

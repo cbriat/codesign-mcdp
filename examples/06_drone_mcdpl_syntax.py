@@ -17,6 +17,11 @@ This is the same MCDP as ``examples/01_drone.py`` but expressed in
 
 Compare with examples/01_drone.py to see how the same model looks when
 written purely through the operator API (FunctionDP + Loop).
+
+Run:  python -m examples.06_drone_mcdpl_syntax
+Expected output: the built drone DP signature, then one block per mission
+with the Kleene iteration count, feasibility, and converged battery mass --
+matching the numbers from examples/01_drone.py.
 """
 from __future__ import annotations
 

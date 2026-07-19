@@ -63,10 +63,20 @@ class AlgebraicDP(DesignProblem):
         name: str = "algebraic",
     ):
         if not isinstance(R, Ports):
-            raise TypeError("AlgebraicDP requires R to be a Ports")
+            raise TypeError(
+                f"AlgebraicDP requires R to be a Ports (a named bundle of "
+                f"resource ports), got {type(R).__name__}. Wrap your resource "
+                f"poset(s) in Ports, e.g. R=Ports({{'mass': Reals(unit='kg')}})."
+            )
         missing = set(R.keys()) - set(equations)
         if missing:
-            raise ValueError(f"missing equations for resources: {missing}")
+            raise ValueError(
+                f"AlgebraicDP is missing equations for resource port(s) "
+                f"{sorted(missing)}. Every resource declared in R must have an "
+                f"entry in `equations`; R declares {sorted(R.keys())} but "
+                f"`equations` only covers {sorted(equations)}. Add a closed-form "
+                f"callable (or constant) for {sorted(missing)} to `equations`."
+            )
         self.F = F
         self.R = R
         self.equations = dict(equations)
@@ -147,7 +157,12 @@ class CatalogDP(DesignProblem):
         name: str = "catalog",
     ):
         if not isinstance(F, Ports) or not isinstance(R, Ports):
-            raise TypeError("CatalogDP requires Ports F and R")
+            raise TypeError(
+                f"CatalogDP requires Ports F and R (named port bundles), got "
+                f"F={type(F).__name__}, R={type(R).__name__}. Wrap each side in "
+                f"Ports, e.g. F=Ports({{'speed': Reals()}}), "
+                f"R=Ports({{'cost': Reals()}})."
+            )
         self.F = F
         self.R = R
         self.name = name
@@ -223,6 +238,14 @@ class ODE_DP(DesignProblem):
     The user supplies dx/dt = rhs(x, t, f) along with a method for extracting
     the resource(s) from the trajectory: either ``steady_state`` (fixed point
     of rhs) or ``final_value`` (integrate to t_end and read off x).
+
+    The integrated state ``x`` (as produced by ``x0_fn``) must be a scalar or
+    a positional sequence of floats: the integrator either does scalar
+    arithmetic on it or zips it component-wise. A *named* (dict-valued) state
+    is rejected with a clear :class:`TypeError` the first time it enters the
+    integrator, rather than being allowed to fail cryptically deep inside
+    :meth:`_simulate` / :meth:`_steady_state`; map named state variables onto
+    a list and index them positionally in ``rhs``/``extract``.
     """
 
     def __init__(
@@ -237,6 +260,14 @@ class ODE_DP(DesignProblem):
         x0_fn: Callable[[Any], Any] | None = None,
         name: str = "ode",
     ):
+        if mode not in ("final_value", "steady_state"):
+            raise ValueError(
+                f"ODE_DP {name!r}: mode must be 'final_value' or "
+                f"'steady_state', got {mode!r}. 'final_value' integrates rhs to "
+                f"t_end and reads off the state; 'steady_state' solves "
+                f"rhs(x)=0 for the fixed point. Pass one of those two strings "
+                f"as mode=."
+            )
         self.F = F
         self.R = R
         self.rhs = rhs
@@ -247,8 +278,35 @@ class ODE_DP(DesignProblem):
         self.x0_fn = x0_fn or (lambda f: 0.0)
         self.name = name
 
-    def _simulate(self, f) -> Any:
+    def _initial_state(self, f) -> Any:
+        """Build and validate the initial state ``x0_fn(f)``.
+
+        The integrator only supports a scalar state or a positional sequence
+        of floats. A dict-valued (named) state is the common mistake, so it is
+        rejected here -- the earliest point the state enters -- with a message
+        that names the offending keys and shows how to switch to a list.
+        """
         x = self.x0_fn(f)
+        if isinstance(x, dict):
+            raise TypeError(
+                f"ODE_DP {self.name!r} state must be a float or a sequence of "
+                f"floats, got a dict with keys {sorted(x.keys())}. ODE_DP "
+                f"integrates a scalar or a positional vector state; it cannot "
+                f"index a mapping. Map named state variables onto a list, e.g. "
+                f"x0_fn=lambda f: [temp, pressure], and index them positionally "
+                f"in your rhs (dx/dt) and extract functions "
+                f"(x[0] is temp, x[1] is pressure)."
+            )
+        if isinstance(x, (str, bytes)):
+            raise TypeError(
+                f"ODE_DP {self.name!r} state must be a float or a sequence of "
+                f"floats, got {type(x).__name__} ({x!r}). Return a scalar "
+                f"(e.g. x0_fn=lambda f: 0.0) or a list/tuple of floats."
+            )
+        return x
+
+    def _simulate(self, f) -> Any:
+        x = self._initial_state(f)
         dt = self.t_end / self.n_steps
         t = 0.0
         for _ in range(self.n_steps):
@@ -261,7 +319,7 @@ class ODE_DP(DesignProblem):
         return x
 
     def _steady_state(self, f) -> Any:
-        x = self.x0_fn(f)
+        x = self._initial_state(f)
         for _ in range(64):
             r = self.rhs(x, 0.0, f)
             if abs(r) < 1e-9:
@@ -306,7 +364,12 @@ class UncertainDP(DesignProblem):
         name: str = "uncertain",
     ):
         if mode not in ("lower", "upper"):
-            raise ValueError("mode must be 'lower' or 'upper'")
+            raise ValueError(
+                f"UncertainDP {name!r}: mode must be 'lower' or 'upper', got "
+                f"{mode!r}. 'lower' solves with the optimistic bound h^L, "
+                f"'upper' with the pessimistic bound h^U. Pass one of those two "
+                f"strings as mode=."
+            )
         self.F = F
         self.R = R
         self.lower = lower

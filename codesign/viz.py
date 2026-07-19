@@ -111,12 +111,16 @@ def plot_antichain(
         antichain = result
     else:
         raise TypeError(
-            "plot_antichain: result must be a SolveResult, "
-            "UncertaintyResult, or Antichain."
+            f"plot_antichain: result must be a SolveResult, "
+            f"UncertaintyResult, or Antichain, got {type(result).__name__}."
         )
 
     if len(axes) not in (2, 3):
-        raise ValueError("axes must be a sequence of 2 or 3 R-port names.")
+        raise ValueError(
+            f"plot_antichain: axes must be a sequence of 2 or 3 R-port names, "
+            f"got {len(axes)} ({list(axes)}). Antichains are plotted in 2-D "
+            f"or 3-D."
+        )
 
     pts = _extract_points(antichain, axes)
     if not pts:
@@ -126,14 +130,16 @@ def plot_antichain(
         )
 
     if len(axes) == 2:
-        if ax is None:
+        created = ax is None
+        if created:
             _, ax = plt.subplots(figsize=(7, 5))
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
-        ax.scatter(xs, ys, s=point_size, c="C3", zorder=4,
-                   edgecolors="black", linewidths=0.7, label=label)
         if shade_dominated:
-            # Build a step boundary: each point dominates everything up-right.
+            # Shade the Pareto-dominated (upper-right) region as a single
+            # clean monotone staircase, so the frontier reads at a glance.
+            # The antichain points form the lower-left frontier; every point
+            # dominates the quadrant up and to the right of it.
             order = sorted(pts, key=lambda r: r[0])
             x_min = min(xs); y_min = min(ys)
             x_max = max(xs); y_max = max(ys)
@@ -143,26 +149,38 @@ def plot_antichain(
             xhi = x_max + pad_x
             ylo = y_min - pad_y
             yhi = y_max + pad_y
-            # Build a polygon that is the upper-right hull of the points.
-            step_x = [xlo]
-            step_y = [yhi]
-            for x, y in order:
-                step_x.extend([x, x])
-                step_y.extend([yhi, y])
+            # Trace the boundary: down the left edge, then a descending
+            # staircase across the points, then up the right edge.
+            step_x = [order[0][0], order[0][0]]
+            step_y = [yhi, order[0][1]]
+            for i in range(1, len(order)):
+                xi, yi = order[i]
+                prev_y = order[i - 1][1]
+                step_x.extend([xi, xi])       # horizontal run at prev level
+                step_y.extend([prev_y, yi])   # then step down to this point
             step_x.append(xhi); step_y.append(order[-1][1])
             step_x.append(xhi); step_y.append(yhi)
-            ax.fill(step_x, step_y, color="C3", alpha=0.12,
-                    label="dominated region" if label is None else None)
+            ax.fill(step_x, step_y, color="C3", alpha=0.12, linewidth=0,
+                    zorder=1, label="dominated region")
             ax.set_xlim(xlo, xhi)
             ax.set_ylim(ylo, yhi)
+        ax.scatter(xs, ys, s=point_size, c="C3", zorder=4,
+                   edgecolors="black", linewidths=0.7, label=label)
         ax.set_xlabel(axes[0])
         ax.set_ylabel(axes[1])
         ax.set_title(title or f"Pareto front: {axes[0]} vs {axes[1]}")
         ax.grid(True, alpha=0.3)
+        # Only show a legend when the caller named the series; otherwise a
+        # lone "dominated region" entry just adds clutter.
+        if label is not None:
+            ax.legend(loc="best", framealpha=0.9)
+        if created:
+            ax.figure.tight_layout()
         return ax
 
     # 3D
-    if ax is None:
+    created = ax is None
+    if created:
         from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
         fig = plt.figure(figsize=(8, 6))
         ax = fig.add_subplot(111, projection="3d")
@@ -171,10 +189,16 @@ def plot_antichain(
     zs = [p[2] for p in pts]
     ax.scatter(xs, ys, zs, s=point_size, c="C3",
                edgecolors="black", linewidths=0.5, label=label)
-    ax.set_xlabel(axes[0])
-    ax.set_ylabel(axes[1])
-    ax.set_zlabel(axes[2])
+    # Give the tick/axis labels room so they don't run into the panes.
+    ax.set_xlabel(axes[0], labelpad=8)
+    ax.set_ylabel(axes[1], labelpad=8)
+    ax.set_zlabel(axes[2], labelpad=8)
     ax.set_title(title or f"Pareto front: {axes[0]}, {axes[1]}, {axes[2]}")
+    if label is not None:
+        ax.legend(loc="upper left")
+    if created:
+        # A little extra margin keeps the 3D axis labels off the figure edge.
+        ax.figure.subplots_adjust(left=0.02, right=0.94, bottom=0.06, top=0.92)
     return ax
 
 
@@ -216,7 +240,8 @@ def plot_convergence(
     if not iters:
         raise ValueError("plot_convergence: trace has no numeric deltas.")
 
-    if ax is None:
+    created = ax is None
+    if created:
         _, ax = plt.subplots(figsize=(7, 4))
     ax.semilogy(iters, deltas, marker="o", markersize=4, label=label)
     ax.set_xlabel("Kleene iteration")
@@ -224,7 +249,9 @@ def plot_convergence(
     ax.set_title(title)
     ax.grid(True, which="both", alpha=0.3)
     if label is not None:
-        ax.legend()
+        ax.legend(loc="best")
+    if created:
+        ax.figure.tight_layout()
     return ax
 
 
@@ -242,6 +269,8 @@ def plot_uncertainty(
     title: Optional[str] = None,
     nominal: Optional[float] = None,
     show_summaries: bool = True,
+    xlabel: Optional[str] = None,
+    legend_loc: str = "best",
 ):
     """Histogram of Monte Carlo samples on a chosen R port.
 
@@ -253,6 +282,16 @@ def plot_uncertainty(
 
     For multi-point antichains, the first point is used (the typical
     case is a single-output system like the drone in example 12).
+
+    Parameters
+    ----------
+    xlabel : str, optional
+        Human-readable x-axis label (e.g. ``"total cost (USD)"``). When
+        omitted, the raw ``port`` name is used.
+    legend_loc : str, optional
+        Matplotlib legend location for the summary lines. Defaults to
+        ``"best"`` so the legend avoids the tallest bars; pass e.g.
+        ``"upper right"`` to pin it.
     """
     plt = _require_matplotlib()
 
@@ -275,10 +314,14 @@ def plot_uncertainty(
             f"plot_uncertainty: no finite values on port {port!r}."
         )
 
-    if ax is None:
+    created = ax is None
+    if created:
         _, ax = plt.subplots(figsize=(8, 4.5))
-    ax.hist(values, bins=bins, alpha=0.5, color="steelblue", edgecolor="black")
-    ax.set_xlabel(port)
+    # Keep edges light so a narrow, many-binned distribution doesn't smear
+    # into a solid black block.
+    ax.hist(values, bins=bins, alpha=0.55, color="steelblue",
+            edgecolor="white", linewidth=0.5)
+    ax.set_xlabel(xlabel if xlabel is not None else port)
     ax.set_ylabel("samples")
 
     if show_summaries:
@@ -300,9 +343,11 @@ def plot_uncertainty(
                 wc = wc_pts[0][port]
                 ax.axvline(wc, color="black", linestyle="--",
                            label=f"worst case {wc:.4g}")
-        ax.legend(loc="upper left", fontsize=9)
+        ax.legend(loc=legend_loc, fontsize=9, framealpha=0.9)
 
     ax.set_title(title or f"MC distribution of {port}")
+    if created:
+        ax.figure.tight_layout()
     return ax
 
 
@@ -399,18 +444,34 @@ def _to_dot_recurse(dp, lines: List[str], counter: List[int],
         return cluster_id
 
     # Composition operators: introspect by class name.
+    # Series/Parallel store their two children as ``dp1``/``dp2`` (see
+    # codesign.composition); older code read ``left``/``right``, which do
+    # not exist and raised AttributeError. Fall back to left/right just in
+    # case a future variant uses those names.
     cls = type(dp).__name__
     if cls == "Series":
-        n_left = _to_dot_recurse(dp.left, lines, counter, parent=None, edge_label=None)
-        n_right = _to_dot_recurse(dp.right, lines, counter, parent=None, edge_label=None)
+        left = getattr(dp, "dp1", None)
+        if left is None:
+            left = getattr(dp, "left", None)
+        right = getattr(dp, "dp2", None)
+        if right is None:
+            right = getattr(dp, "right", None)
+        n_left = _to_dot_recurse(left, lines, counter, parent=None, edge_label=None)
+        n_right = _to_dot_recurse(right, lines, counter, parent=None, edge_label=None)
         lines.append(f'  {n_left} -> {n_right} [label="series"];')
         if parent is not None:
-            lines.append(f'  {parent} -> {n_left}'
-                         f'{f" [label=\"{edge_label}\"]" if edge_label else ""};')
+            suffix = f' [label="{edge_label}"]' if edge_label else ""
+            lines.append(f"  {parent} -> {n_left}{suffix};")
         return n_left
     if cls == "Parallel":
-        n_left = _to_dot_recurse(dp.left, lines, counter, parent=None, edge_label=None)
-        n_right = _to_dot_recurse(dp.right, lines, counter, parent=None, edge_label=None)
+        left = getattr(dp, "dp1", None)
+        if left is None:
+            left = getattr(dp, "left", None)
+        right = getattr(dp, "dp2", None)
+        if right is None:
+            right = getattr(dp, "right", None)
+        n_left = _to_dot_recurse(left, lines, counter, parent=None, edge_label=None)
+        n_right = _to_dot_recurse(right, lines, counter, parent=None, edge_label=None)
         # No edge between them, but bracket them with a synthetic node:
         bracket = _node_id("par", counter)
         lines.append(f'  {bracket} [label="parallel", shape=plaintext];')

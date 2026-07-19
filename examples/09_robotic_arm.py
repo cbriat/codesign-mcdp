@@ -18,10 +18,14 @@ battery via the power bus, and the shoulder must support the elbow's mass.
 In lambda form, the five-line constraint block at the end of ``make_arm``
 would be twenty lines of nested dict lookups. With operator overloading it
 reads like an equation sheet.
+
+Running this script prints the assembled system structure, then the
+minimum feasible ``total_mass`` for three mission scenarios (light
+pick-and-place, heavier payload, long-reach). No figures are produced.
 """
 from __future__ import annotations
 
-from codesign import Module, Reals, System, minimize_cost, solve
+from codesign import Module, Reals, System, solve
 
 
 G = 9.81

@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  smoke:
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -22,18 +22,42 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install the package
-        run: pip install -e .
+      - name: Install the package with dev extras
+        run: pip install -e ".[dev]"
 
-      - name: Run smoke tests
-        run: python -m tests.test_smoke
+      - name: Run the full test suite
+        run: python -m pytest tests/ -q
 
-      - name: Run examples (sanity check)
+      - name: Run all examples (headless)
+        env:
+          MPLBACKEND: Agg
         run: |
-          python -m examples.01_drone
-          python -m examples.02_integer_optimization
-          python -m examples.03_auv_seabed
-          python -m examples.04_uncertain_and_ode
-          python -m examples.06_drone_mcdpl_syntax
-          python -m examples.07_drone_modular
-          python -m examples.08_vehicle_modular
+          set -e
+          for m in \
+            01_drone \
+            02_integer_optimization \
+            03_auv_seabed \
+            04_uncertain_and_ode \
+            05_visualize_kleene \
+            06_drone_mcdpl_syntax \
+            07_drone_modular \
+            08_vehicle_modular \
+            09_robotic_arm \
+            10_solver_trace \
+            11_uncertain_drone \
+            12_stochastic_drone \
+            13_microgrid \
+            14_online_fleet \
+            15_bioprocess \
+            16_online_doe \
+            17_car_codesign \
+            18_metabolic_switching \
+            19_rover_modules \
+            20_sequential_codesign \
+            21_reconfigurable_robot \
+            22_online_feedback_codesign \
+            23_formula1_season \
+            24_car_catalog_codesign; do
+            echo "=== examples.$m ==="
+            python -m "examples.$m"
+          done

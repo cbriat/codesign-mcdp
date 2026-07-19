@@ -154,7 +154,11 @@ class System:
         if module_name in self._modules:
             raise ValueError(f"module name {module_name!r} already in use")
         if "." in module_name:
-            raise ValueError("module name may not contain '.' (used for port refs)")
+            raise ValueError(
+                f"module name {module_name!r} may not contain '.' -- the dot "
+                f"is reserved for port references like 'battery.mass'. Rename "
+                f"the subsystem without a dot."
+            )
         if module_name == _MODULES_AXIS:
             raise ValueError(f"module name {_MODULES_AXIS!r} is reserved")
         if not isinstance(dp.F, Ports) or not isinstance(dp.R, Ports):
@@ -172,7 +176,7 @@ class System:
 
         - a string of the form ``"module.f_port"`` or an outer R name, or
         - a :class:`~codesign.sugar.Port` (typically obtained from a
-          :class:`ModuleHandle` or from :meth:`provides` / :meth:`requires`).
+          :class:`~codesign.sugar.ModuleHandle` or from :meth:`provides` / :meth:`requires`).
 
         ``demand`` may be:
 
@@ -212,7 +216,11 @@ class System:
                 "System has no subsystems and no outer resources; nothing to solve"
             )
         if not self._outer_R:
-            raise ValueError("System must declare at least one requires()")
+            raise ValueError(
+                f"System {self.name!r} must declare at least one requires() "
+                f"(an outer resource). Add one with "
+                f"sys.requires('name', unit=...)."
+            )
 
         # Bucket constraints by target.
         f_targets: Dict[tuple, List[Callable]] = {}

@@ -48,16 +48,14 @@ ranges reported for E. coli diauxic growth on glucose versus acetate
 regime carries a measurable proteomic overhead from gluconeogenesis and
 the glyoxylate shunt). They are not fitted to a specific strain.
 
-Run directly to print the schedule under low and high re-acclimation
-cost; the high-cost case suppresses an otherwise-tempting switch.
+Run:  python -m examples.18_metabolic_switching
+Expected output: the substrate / growth-rate environment, then the optimal
+architecture schedule under low (0.05) and high (0.8) per-switch cost; the
+high-cost case rides out the mixed epoch on the incumbent pathway instead
+of taking two switches.
 """
 
 from __future__ import annotations
-
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     AlgebraicDP,

@@ -26,7 +26,7 @@ flowsheet:
 The output is a :class:`graphviz.Digraph` object that can be rendered
 to SVG / PDF / PNG via its ``.render(format=...)`` method, or
 displayed inline in a Jupyter notebook (Digraph implements
-``_repr_html_``). The graphviz Python package and the ``dot`` binary
+``_repr_svg_``). The graphviz Python package and the ``dot`` binary
 are both required at render time; both are widely available
 (``pip install graphviz`` plus ``apt-get install graphviz`` or
 equivalent on the host system).
@@ -291,7 +291,7 @@ def _extract_spec(system) -> _Spec:
 
 
 # ---------------------------------------------------------------------------
-# Cycle detection: tarjan's strongly-connected-components on the
+# Cycle detection: Tarjan's strongly-connected-components on the
 # module-level graph induced by constraint sources/targets.
 # ---------------------------------------------------------------------------
 

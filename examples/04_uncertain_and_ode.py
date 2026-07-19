@@ -16,6 +16,11 @@ where heat loss follows Newton's law of cooling:
 
 At steady state, P_in = h * (T_ss - T_ambient), so the power needed to
 hold a temperature is monotone in the temperature setpoint.
+
+Run:  python -m examples.04_uncertain_and_ode
+Expected output: the optimistic vs. pessimistic battery mass for a 1 kWh
+capacity, then the steady-state heater power for several temperature rises
+(each matching the closed-form h_loss * delta_T).
 """
 from __future__ import annotations
 

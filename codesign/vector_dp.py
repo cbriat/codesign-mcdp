@@ -266,7 +266,11 @@ def solve_vector_sequential(
             return st.candidates
         if architectures is None:
             raise ValueError(
-                f"stage {st.name!r} has no candidates and no default set"
+                f"stage {st.name!r} has no candidates and no default "
+                f"architecture set was supplied. Either set candidates=[...] "
+                f"on the stage, or pass architectures=[...] to the vector "
+                f"sequential solver (solve_vector_sequential / "
+                f"check_vector_monotonicity)."
             )
         return architectures
 
@@ -400,7 +404,11 @@ def check_vector_monotonicity(
             return st.candidates
         if architectures is None:
             raise ValueError(
-                f"stage {st.name!r} has no candidates and no default set"
+                f"stage {st.name!r} has no candidates and no default "
+                f"architecture set was supplied. Either set candidates=[...] "
+                f"on the stage, or pass architectures=[...] to the vector "
+                f"sequential solver (solve_vector_sequential / "
+                f"check_vector_monotonicity)."
             )
         return architectures
 

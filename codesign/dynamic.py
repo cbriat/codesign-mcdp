@@ -40,7 +40,7 @@ must be bucketed for tabular DP. The grid is explicit in the API so the
 discretisation is never hidden from the caller.
 
 The structure mirrors :mod:`codesign.temporal`: an :class:`Architecture`
-there and here play the same role, a :class:`Stage` is the dynamic analogue
+there and here plays the same role, a :class:`Stage` is the dynamic analogue
 of an ``Epoch``, and :func:`solve_dynamic` is the backward-DP analogue of
 that module's forward Viterbi pass.
 """
@@ -181,14 +181,21 @@ class StateGrid:
 
     def __init__(self, nodes: Sequence[float]):
         if not nodes:
-            raise ValueError("StateGrid needs at least one node")
+            raise ValueError(
+                "StateGrid needs at least one node, got an empty sequence. "
+                "Pass the grid node values explicitly, e.g. "
+                "StateGrid([0.0, 1.0, 2.0]), or use StateGrid.linspace(lo, hi, n)."
+            )
         self.nodes: List[float] = sorted(float(n) for n in nodes)
 
     @classmethod
     def linspace(cls, lo: float, hi: float, n: int) -> "StateGrid":
         """Build an evenly spaced grid of ``n`` nodes on ``[lo, hi]``."""
         if n < 1:
-            raise ValueError("need at least one node")
+            raise ValueError(
+                f"StateGrid.linspace needs at least one node, got n={n}. "
+                f"Pass n >= 1 (n=1 yields a single node at lo)."
+            )
         if n == 1:
             return cls([lo])
         step = (hi - lo) / (n - 1)
@@ -341,7 +348,8 @@ def solve_dynamic(
         if architectures is None:
             raise ValueError(
                 f"stage {st.name!r} has no candidates and no default "
-                f"architecture set was supplied"
+                f"architecture set was supplied. Either set candidates=[...] "
+                f"on the stage, or pass architectures=[...] to solve_dynamic()."
             )
         return architectures
 

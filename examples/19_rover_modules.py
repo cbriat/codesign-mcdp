@@ -58,17 +58,13 @@ Parameter values are illustrative, in the qualitative range of a small
 solar rover (tens to low hundreds of Wh per phase, a battery of a few
 hundred Wh). They are not drawn from a specific vehicle.
 
-Run directly to solve the policy and roll it out from a full and from a
-depleted initial battery, showing how the module-activation schedule
-changes with available charge.
+Run:  python -m examples.19_rover_modules
+Expected output: the mode / battery setup, then two rollouts of the solved
+policy from a full (300 Wh) and a depleted (90 Wh) initial battery, showing
+the module-activation schedule shed load to lighter modes as charge falls.
 """
 
 from __future__ import annotations
-
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     AlgebraicDP,
