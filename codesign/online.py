@@ -23,9 +23,13 @@ its output antichain:
 - :class:`LipschitzEvaluator` assumes the output is Lipschitz in the
   features with a user-supplied constant L. The bounds tighten by
   L * ||f - f_observed|| around every observation.
-- :class:`LinearParametricEvaluator` fits a running least-squares
-  linear model to observed output values and bounds new queries using
-  a confidence band around the regressor.
+- :class:`LinearParametricEvaluator` assumes each output component is
+  an exact affine function of the features and maintains a confidence
+  polytope over the unknown linear parameters consistent with the
+  observations; the bound at a new query is a per-coordinate LP
+  minimising the predicted resource over that polytope. This is a
+  certified (guaranteed lower-bounding) optimistic evaluator, following
+  arXiv:2604.22624 Section V-C3.
 
 The driver :func:`solve_online` is :func:`~codesign.solver.solve`'s
 budgeted online cousin: it evaluates at most ``budget`` candidates,
@@ -35,6 +39,7 @@ together with diagnostics about the elimination process.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import (
     Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple,
@@ -57,6 +62,19 @@ def _import_numpy():
         raise ImportError(
             "The online learning module requires numpy. "
             "Install with `pip install numpy`."
+        ) from e
+
+
+def _import_linprog_or_die():
+    try:
+        from scipy.optimize import linprog
+        return linprog
+    except ImportError as e:
+        raise ImportError(
+            "LinearParametricEvaluator's certified optimistic bound requires "
+            "scipy (for scipy.optimize.linprog). "
+            "Install with `pip install scipy` (or `pip install "
+            "codesign-mcdp[online]`)."
         ) from e
 
 
@@ -240,58 +258,239 @@ class LipschitzEvaluator(OptimisticEvaluator):
 
 
 class LinearParametricEvaluator(OptimisticEvaluator):
-    """Bounds from a running least-squares linear model.
+    r"""Certified optimistic bound for a linear-parametric resource map.
 
-    Assumes each R component is approximately linear in the features:
-    ``h_k(c) approx a_k + b_k . features(c)``. After a few observations,
-    fit the coefficients by ordinary least squares; the bound at a query
-    point is the prediction +/- ``confidence`` * sigma_k, where sigma_k
-    is the residual standard deviation.
+    Faithful implementation of the linear-parametric evaluator of
+    Alharbi, Dahleh & Zardini (arXiv:2604.22624), Section V-C3,
+    equations (26)-(28) and Lemma V.5. Unlike an ordinary least-squares
+    fit with a heuristic confidence band, the bound returned here is a
+    *guaranteed* lower bound: it can never exceed the true inner-solve
+    resource, so a candidate is only ever eliminated when it is provably
+    suboptimal. (The previous OLS +/- ``confidence`` * sigma band had no
+    such guarantee and could wrongly eliminate an optimal candidate.)
 
-    Falls back to the default (0, +inf) bound while we have fewer than
-    ``min_obs`` observations.
+    Model and assumption
+    --------------------
+    Each resource coordinate ``k`` is assumed to be an *exact* affine
+    function of the features, i.e. there is an unknown parameter vector
+    ``theta_k* in R^p`` (with ``p = 1 + n_features``, an intercept plus
+    one coefficient per feature) such that, for the feature row
+    ``phi(c) = [1, features(c)]``,
+
+        req_k(c) = phi(c) . theta_k*      for every candidate c.
+
+    This is the paper's *deterministic / noiseless* linear model
+    (``req(i) = Phi(i) theta*``); the observations are treated as exact
+    linear equalities. Set ``noise_bound > 0`` to instead assume the
+    observations are corrupted by bounded noise
+    ``|req_k(c) - phi(c) . theta_k*| <= noise_bound`` (a documented
+    extension of the paper's construction), which relaxes each equality
+    into a two-sided band and keeps the lower bound valid under that
+    noise model.
+
+    Confidence set and bound
+    ------------------------
+    Given the observation history ``H``, the confidence set (eq. 26) is
+    the subset of the prior box ``Theta_0`` consistent with every
+    observation,
+
+        Theta(H) = { theta in Theta_0 : phi(j) . theta = r_j,k
+                                        for all observations (j, r_j) },
+
+    which -- ``Theta_0`` being a box, hence a convex polytope --
+    is itself a convex polytope. The optimistic bound at a query
+    candidate ``i`` is the coordinatewise minimum of the predicted
+    resource over that polytope (eq. 27-28):
+
+        [req_opt(i, H)]_k = min_{theta in Theta(H)} phi(i) . theta,
+
+    a single Linear Program per resource coordinate, solved with
+    :func:`scipy.optimize.linprog`. Since ``theta_k*`` is feasible for
+    the LP, its optimum is ``<= phi(i) . theta_k* = req_k(i)``, which is
+    exactly the optimism guarantee of Lemma V.5. The bound only
+    tightens as observations accumulate (``Theta(H') subseteq
+    Theta(H)``). No upper bound is certified by this construction, so
+    the returned upper bound stays at ``+inf`` (the trivial value).
+
+    Parameters
+    ----------
+    features, r_components : sequence of str
+        As in :class:`OptimisticEvaluator`.
+    prior_box : None, or (lo, hi), or dict, optional
+        The prior set ``Theta_0`` on the parameters, needed to keep the
+        LP bounded when the observations under-determine ``theta`` (the
+        polytope is otherwise unbounded and the bound falls back to the
+        trivial ``0``). Forms:
+
+        - ``None`` (default): each parameter is unbounded,
+          ``(-inf, +inf)``. This is always *safe* (it cannot exclude the
+          true ``theta*`` and so cannot break the optimism guarantee);
+          the cost is looser bounds while the fit is under-determined.
+        - ``(lo, hi)``: two floats applied as ``lo <= theta_j <= hi`` to
+          every parameter of every coordinate.
+        - ``dict`` mapping an ``r_components`` name to its own
+          ``(lo, hi)`` pair.
+
+        Per the paper's assumption ``theta* in Theta_0``: if you supply a
+        finite box you must ensure it contains the true parameters, or
+        the lower bound may become invalid.
+    noise_bound : float, optional
+        Half-width of the observation-consistency band (default ``0.0``,
+        the paper's exact/noiseless model). A small numerical
+        feasibility tolerance is always added on top so that float
+        round-off on genuinely-noiseless data does not make the LP
+        spuriously infeasible.
+    min_obs : int, optional
+        Number of observations below which the trivial ``(0, +inf)``
+        bound is returned (default ``3``). Above it, the per-coordinate
+        LP is solved.
+    confidence : float, optional
+        **Deprecated and ignored.** Retained only for backward
+        compatibility with the previous OLS-band implementation; passing
+        it emits a :class:`DeprecationWarning`. The certified bound has
+        no confidence-band parameter.
+    solver : str, optional
+        ``method`` forwarded to :func:`scipy.optimize.linprog`
+        (default ``"highs"``).
+
+    Cost
+    ----
+    One LP per resource coordinate per :meth:`bound` call.
     """
 
-    def __init__(self, features, r_components, confidence=2.0, min_obs=3):
+    def __init__(self, features, r_components, confidence=None, min_obs=3,
+                 *, prior_box=None, noise_bound=0.0, solver="highs"):
         super().__init__(features, r_components)
-        self.confidence = float(confidence)
+        if confidence is not None:
+            warnings.warn(
+                "LinearParametricEvaluator(confidence=...) is deprecated and "
+                "ignored: the evaluator was reimplemented as the certified "
+                "optimistic bound of arXiv:2604.22624 Sec. V-C3 (a confidence "
+                "polytope over the linear parameters plus one LP per resource "
+                "coordinate), which has no confidence-band parameter. Remove "
+                "`confidence`; to model bounded observation noise pass "
+                "`noise_bound=<eps>`, and to keep the bound finite on an "
+                "under-determined fit pass `prior_box=(lo, hi)`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.confidence = confidence  # retained (ignored) for repr/introspection
         self.min_obs = int(min_obs)
+        if noise_bound < 0:
+            raise ValueError(
+                f"noise_bound must be non-negative, got {noise_bound!r}. It is "
+                f"the half-width of the observation band |phi(j).theta - r| <= "
+                f"noise_bound; use 0.0 for the paper's exact linear model."
+            )
+        self.noise_bound = float(noise_bound)
+        self.prior_box = prior_box
+        self.solver = str(solver)
+
+    # ------------------------------------------------------------------ #
+    # Prior box -> per-coordinate parameter bounds
+    # ------------------------------------------------------------------ #
+
+    def _param_bounds(self, k: str, p: int):
+        """Return a length-``p`` list of ``(lo, hi)`` parameter bounds.
+
+        ``None`` on either side means unbounded (linprog's convention).
+        """
+        box = self.prior_box
+        if box is None:
+            return [(None, None)] * p
+        if isinstance(box, dict):
+            if k not in box:
+                return [(None, None)] * p
+            spec = box[k]
+        else:
+            spec = box
+        try:
+            lo, hi = spec
+        except (TypeError, ValueError):
+            raise TypeError(
+                f"prior_box entry for {k!r} must be a (lo, hi) pair, got "
+                f"{spec!r}. Pass None (unbounded), a (lo, hi) float pair "
+                f"applied to every parameter, or a dict "
+                f"{{r_component: (lo, hi)}}."
+            )
+        lo = None if lo is None or not math.isfinite(float(lo)) else float(lo)
+        hi = None if hi is None or not math.isfinite(float(hi)) else float(hi)
+        return [(lo, hi)] * p
 
     def bound(self, candidate):
         feat = _feature_vector(candidate, self.features)
         lo = {k: 0.0 for k in self.r_components}
         hi = {k: float("inf") for k in self.r_components}
+        # Degenerate: too few observations -> paper's req_opt(i, empty) = bottom.
         if len(self._obs) < self.min_obs:
             return lo, hi
+
         np = _import_numpy()
-        X = np.array([[1.0] + list(o.features) for o in self._obs])
+        linprog = _import_linprog_or_die()
+
+        p = 1 + len(feat)
+        # Query feature row phi(i) = [1, features(i)]; also the LP objective.
+        c_obj = np.array([1.0] + list(feat), dtype=float)
+        # Design matrix Phi_H (one row phi(j) per observation).
+        Phi = np.array([[1.0] + list(o.features) for o in self._obs],
+                       dtype=float)
+
         for k in self.r_components:
-            y = np.array([o.summary.get(k, float("nan")) for o in self._obs])
+            y = np.array([o.summary.get(k, float("nan")) for o in self._obs],
+                         dtype=float)
             mask = np.isfinite(y)
-            if mask.sum() < self.min_obs:
+            if not mask.any():
                 continue
-            Xk = X[mask]
-            yk = y[mask]
-            try:
-                coef, *_ = np.linalg.lstsq(Xk, yk, rcond=None)
-            except np.linalg.LinAlgError:
-                continue
-            pred = float(coef[0] + sum(coef[i + 1] * feat[i]
-                                       for i in range(len(feat))))
-            residuals = yk - Xk @ coef
-            if residuals.size > Xk.shape[1]:
-                sigma = float(np.sqrt(
-                    (residuals ** 2).sum() / (residuals.size - Xk.shape[1])
-                ))
-            else:
-                sigma = float(np.abs(residuals).max() if residuals.size else 0.0)
-            lower_k = max(0.0, pred - self.confidence * sigma)
-            upper_k = pred + self.confidence * sigma
+            Phi_k = Phi[mask]
+            y_k = y[mask]
+
+            bounds = self._param_bounds(k, p)
+
+            # Observation-consistency band: |phi(j).theta - r| <= tol, encoded
+            # as phi(j).theta <= r + tol and -phi(j).theta <= -(r - tol).
+            # A small relative feasibility tolerance absorbs float round-off so
+            # that exactly-linear (noiseless) data is not spuriously infeasible.
+            scale = 1.0 + float(np.abs(y_k).max())
+            feas_eps = 1e-9 * scale
+            tol = self.noise_bound + feas_eps
+
+            A_ub = np.vstack([Phi_k, -Phi_k])
+            b_ub = np.concatenate([y_k + tol, -(y_k - tol)])
+
+            lower_k = self._solve_lp(linprog, c_obj, A_ub, b_ub, bounds,
+                                     feas_eps, scale)
+            if lower_k is None:
+                continue  # unbounded / infeasible / solver failure -> trivial
+            lower_k = max(0.0, lower_k)
             if lower_k > lo[k]:
                 lo[k] = lower_k
-            if upper_k < hi[k]:
-                hi[k] = upper_k
         return lo, hi
+
+    def _solve_lp(self, linprog, c_obj, A_ub, b_ub, bounds, feas_eps, scale):
+        """Minimise ``c_obj . theta`` over the confidence polytope.
+
+        Returns the optimum, or ``None`` when the LP is unbounded,
+        infeasible (after one relaxation retry), or the solver fails --
+        all of which safely degrade to the trivial lower bound.
+        """
+        res = linprog(c_obj, A_ub=A_ub, b_ub=b_ub, bounds=bounds,
+                      method=self.solver)
+        if res.status == 0:  # optimal
+            return float(res.fun)
+        if res.status == 3:  # unbounded (under-determined + open prior box)
+            return None
+        if res.status == 2:  # infeasible -- retry with a wider band
+            relaxed = b_ub.copy()
+            n = relaxed.size // 2
+            bump = 1e3 * feas_eps
+            relaxed[:n] += bump          # r + tol side
+            relaxed[n:] += bump          # -(r - tol) side (also loosens)
+            res2 = linprog(c_obj, A_ub=A_ub, b_ub=relaxed, bounds=bounds,
+                           method=self.solver)
+            if res2.status == 0:
+                return float(res2.fun)
+            return None
+        return None
 
 
 class GaussianProcessEvaluator(OptimisticEvaluator):

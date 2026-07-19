@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Certified `LinearParametricEvaluator`** (`codesign/online.py`). The
+  online-learning linear-parametric evaluator was reimplemented as the
+  certified optimistic bound of Alharbi, Dahleh & Zardini
+  (arXiv:2604.22624), Section V-C3, equations (26)-(28) and Lemma V.5.
+  The previous version was an ordinary least-squares fit with a
+  heuristic `+/- confidence * sigma` band, which is **not** a guaranteed
+  lower bound and could wrongly eliminate an optimal candidate (observed
+  in `examples/14_online_fleet.py`, where it dropped the true Pareto
+  point `r033`). The new evaluator maintains a confidence polytope
+  `Theta(H) = { theta in Theta_0 : phi(j).theta = r for all observations }`
+  over the unknown linear parameters and returns, per resource
+  coordinate, the minimum predicted resource over that polytope
+  (`min_{theta in Theta(H)} phi(i).theta`) via one
+  `scipy.optimize.linprog` LP each. This bound is a true optimistic
+  (guaranteed lower-bounding) evaluator, so a candidate is eliminated
+  only when it is provably suboptimal. New keyword arguments: `prior_box`
+  (the prior set `Theta_0` on the parameters, needed to keep the LP
+  bounded when the fit is under-determined; default unbounded, which is
+  always safe), `noise_bound` (half-width of a bounded-noise
+  observation band; default `0.0`, the paper's exact/noiseless model),
+  and `solver` (linprog method). The `confidence` keyword is deprecated
+  and ignored (passing it emits a `DeprecationWarning`); `min_obs` is
+  unchanged. Covered by `tests/test_online_linear_parametric.py` (15
+  tests: an optimism property test over random linear instances, an
+  explicit demonstration that the old OLS band over-eliminates where the
+  certified bound stays valid, the degenerate cases, and full-Pareto
+  recovery against the no-pruning baseline). Note: on a genuinely
+  non-linear inner-solve map (e.g. `examples/16_online_doe.py`) the
+  exact-linear LPs are infeasible and the bound safely degrades to the
+  trivial `0` rather than making unsafe eliminations.
+
 ### Added
 - **Formula 1 seasonal co-design** (`examples/23_formula1_season.py`,
   `tests/test_formula1.py`). A faithful reproduction of the hierarchical
