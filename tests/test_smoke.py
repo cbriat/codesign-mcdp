@@ -558,12 +558,19 @@ def test_viz_smoke():
         # binary; fall back to a structural check when neither is present.
         try:
             import graphviz
-            graphviz.Source(src).pipe(format="canon")
-            return True
         except ImportError:
-            pass
-        except Exception:
-            return False
+            graphviz = None
+        if graphviz is not None:
+            try:
+                graphviz.Source(src).pipe(format="canon")
+                return True
+            except graphviz.ExecutableNotFound:
+                # graphviz python package present but the `dot` binary is
+                # absent (e.g. GitHub runners): fall through to the other
+                # strategies rather than treating valid dot as invalid.
+                pass
+            except Exception:
+                return False  # a genuine dot parse error
         import shutil
         import subprocess
         if shutil.which("dot"):
