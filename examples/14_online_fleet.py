@@ -180,10 +180,9 @@ def run():
             features=["cost_per_capacity", "energy_per_km"],
             r_components=["total_cost", "total_energy"],
         )),
-        ("LinearParametric (confidence=3.0)", LinearParametricEvaluator(
+        ("LinearParametric (certified)", LinearParametricEvaluator(
             features=["speed", "payload", "unit_cost", "energy_per_km"],
             r_components=["total_cost", "total_energy"],
-            confidence=3.0,
             min_obs=5,
         )),
     ]

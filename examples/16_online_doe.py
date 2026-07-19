@@ -433,7 +433,6 @@ def main():
         ("LinearParametric", LinearParametricEvaluator(
             features=norm_features,
             r_components=r_components,
-            confidence=2.5,
             min_obs=10,
         )),
     ]
