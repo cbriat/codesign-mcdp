@@ -412,21 +412,38 @@ def run_ea_panel(g: Callable[[np.ndarray], np.ndarray], d: int,
         return None
 
     n_constr = 0 if f is None else 2
+    # pymoo's MOEA/D cannot accept hard constraints; for the constrained
+    # (monotone) family we hand it the target as a large additive penalty on
+    # the *search* objective instead (a standard penalty method), while the
+    # cumulative archive is still scored on the TRUE, unpenalized resource
+    # values recorded in ``trace`` -- exactly the paper's worst-resource
+    # feasibility handling. Without this MOEA/D silently dropped out of the
+    # monotone panel entirely (unfair/incomplete EA comparison).
+    PENALTY = 100.0
 
     class _GProblem(Problem):
-        def __init__(self):
-            super().__init__(n_var=d, n_obj=2, n_ieq_constr=n_constr,
+        def __init__(self, penalize: bool = False):
+            # ``penalize`` folds the target into the objective (no hard
+            # constraint) so constraint-free algorithms (MOEA/D) stay feasible.
+            super().__init__(n_var=d, n_obj=2,
+                             n_ieq_constr=0 if penalize else n_constr,
                              xl=0.0, xu=1.0)
+            self._penalize = penalize
             self.trace: List[Tuple[float, float, bool]] = []
 
         def _evaluate(self, X, out, *args, **kwargs):
             F = g(np.atleast_2d(X))
-            out["F"] = F
-            if f is not None:
-                out["G"] = f[None, :] - F  # <= 0 means feasible
             for row in F:
                 ok = True if f is None else bool(np.all(row >= f))
                 self.trace.append((float(row[0]), float(row[1]), ok))
+            if f is not None and self._penalize:
+                viol = np.maximum(0.0, f[None, :] - F).sum(axis=1,
+                                                           keepdims=True)
+                out["F"] = F + PENALTY * viol  # search only; trace stays true
+            else:
+                out["F"] = F
+                if f is not None:
+                    out["G"] = f[None, :] - F  # <= 0 means feasible
 
     pop = 20
     n_gen = max(2, budget // pop)
@@ -438,7 +455,8 @@ def run_ea_panel(g: Callable[[np.ndarray], np.ndarray], d: int,
     }
     results: Dict[str, Tuple[float, List[float]]] = {}
     for name, factory in algos.items():
-        prob = _GProblem()
+        # MOEA/D has no native constraint support -> penalty formulation.
+        prob = _GProblem(penalize=(name == "MOEA/D" and n_constr > 0))
         try:
             minimize(prob, factory(), ("n_gen", n_gen), seed=seed, verbose=False)
         except Exception as exc:
