@@ -31,6 +31,7 @@ on GitHub without running anything.
 | 22 | [`22_online_feedback_codesign.ipynb`](22_online_feedback_codesign.ipynb) | Online feedback co-design: an adaptive sensor node that re-solves its co-design each step against its measured battery charge and live demand. Closed-loop audit trail and a charge/demand/config plot. |
 | 23 | [`23_formula1_season.ipynb`](23_formula1_season.ipynb) | Hierarchical co-design for a Formula 1 season (precompute-then-DP): race-level co-design frozen into a Pareto catalog, then a season MDP maximising expected championship points. Reproduces the paper's Fig. 1 race front and its two findings. |
 | 24 | [`24_car_catalog_codesign.ipynb`](24_car_catalog_codesign.ipynb) | Catalog-driven full-vehicle co-design: one 12-row architecture table plus one `build_architecture()` spans ICE/MHEV/FHEV/PHEV/REEV/BEV, closing the mass and BEV-energy spirals. Feasibility table, (cost, energy, mass) Pareto front, and powertrain-class comparison. |
+| 25 | [`25_online_paper_benchmarks.ipynb`](25_online_paper_benchmarks.ipynb) | Replication study of the online co-design paper (arXiv:2604.22624) synthetic benchmarks E1/E2: Table I/II HVD panels, convergence figures, and an honest validation verdict (claims (a)/(b) reproduce; claim (c) NOT REPRODUCED under independent re-run). |
 
 ## Running locally
 
