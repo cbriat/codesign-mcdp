@@ -55,11 +55,13 @@ Run:  python -m examples.23_formula1_season
 Expected output: the precomputed race Pareto fronts, the optimal per-race
 policy and expected season points, the two headline findings (local penalty
 for global gain; race-order invariance of the total with an order-dependent
-policy), and three saved paper-analogue figures (f1_paper_fig1-3_*.png).
+policy), and three saved paper-analogue figures written to ``outputs/``
+(``f1_paper_fig1-3_*.png``).
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -554,16 +556,23 @@ def figure3_finishing_distribution(track, grid_starts=(3, 6), ax=None):
     return ax
 
 
-def save_paper_figures(path_prefix="f1_paper_fig"):
+def save_paper_figures(out_dir=None, path_prefix="f1_paper_fig"):
     """Render and save the three paper-analogue figures as PNGs.
 
     Returns the list of written file paths. Called from ``main`` when
     matplotlib is available; the figures are the visual comparison against
-    the paper's Figs. 1-3.
+    the paper's Figs. 1-3. The PNGs are written to ``outputs/`` (anchored
+    to the package root, not the current working directory).
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    if out_dir is None:
+        out_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "outputs"))
+    os.makedirs(out_dir, exist_ok=True)
+    prefix = os.path.join(out_dir, path_prefix)
 
     fra = Track("Paul Ricard (FRA)", base_time=5060.0, overtake_difficulty=0.4)
     can = Track("Villeneuve (CAN)", base_time=5100.0, overtake_difficulty=0.35)
@@ -572,17 +581,17 @@ def save_paper_figures(path_prefix="f1_paper_fig"):
     paths = []
     fig, ax = plt.subplots(figsize=(7.8, 5.4))
     figure1_race_fronts(fra, ax=ax)
-    fig.tight_layout(); p = f"{path_prefix}1_race_fronts.png"
+    fig.tight_layout(); p = f"{prefix}1_race_fronts.png"
     fig.savefig(p, dpi=130); plt.close(fig); paths.append(p)
 
     fig, ax = plt.subplots(figsize=(7.8, 5.0))
     figure2_position_penalty([can, mon], ax=ax)
-    fig.tight_layout(); p = f"{path_prefix}2_position_penalty.png"
+    fig.tight_layout(); p = f"{prefix}2_position_penalty.png"
     fig.savefig(p, dpi=130); plt.close(fig); paths.append(p)
 
     fig, ax = plt.subplots(figsize=(7.8, 5.0))
     figure3_finishing_distribution(fra, ax=ax)
-    fig.tight_layout(); p = f"{path_prefix}3_finishing_distribution.png"
+    fig.tight_layout(); p = f"{prefix}3_finishing_distribution.png"
     fig.savefig(p, dpi=130); plt.close(fig); paths.append(p)
     return paths
 
