@@ -16,7 +16,7 @@ Quick example:
     print(solve(battery, {"capacity": 3.6e6}))
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .antichains import Antichain
 from .composition import Loop, Parallel, Series, loop, par, series
