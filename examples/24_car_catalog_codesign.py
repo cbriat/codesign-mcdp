@@ -1,89 +1,83 @@
 """
-Example 17: Full-car co-design across ICE, hybrid, and battery-electric powertrains.
+Example 24: Catalog-driven car co-design from a single architecture table.
 
-A granular decomposition of a passenger vehicle into 22 subsystems
-spread across three groups (powertrain, chassis, interior+aux), with
-a 12-entry architecture catalog covering pure-ICE, mild hybrid, full
-hybrid, plug-in hybrid, range-extender EV, and battery-electric
-configurations. The MCDP framework resolves the classic automotive
-"weight death spiral" cycle (vehicle mass drives required propulsion
-power, which drives engine / motor / battery / fuel tank mass, which
-contributes back to vehicle mass) by Kleene iteration on the
-monotonic constraint network.
+A passenger vehicle is decomposed into 22 subsystems (powertrain,
+chassis, interior + auxiliary). A single 12-row ARCHITECTURE_CATALOG
+drives the whole study: each row pre-selects the discrete powertrain
+choices (engine, transmission, electric-motor topology, boost, battery
+strategy, charger, drivetrain) for one point on the modern technology
+spectrum -- pure ICE, mild hybrid (MHEV), full hybrid (FHEV), plug-in
+hybrid (PHEV), range-extender EV (REEV) and battery-electric (BEV) --
+while the parametric modules (cooling, fuel, battery, brakes,
+suspension, tyres, ...) size themselves from mission demand. The body,
+tyres and suspension stay full CatalogDPs so the solver still chooses
+the cheapest chassis that satisfies the mission.
 
-Subsystems
-----------
+This is the co-design counterpart of the hand-wired 17_car_codesign.py:
+here one table + one build_architecture() function replaces the three
+separate build_ice/build_hybrid/build_ev builders, and every powertrain
+choice is a CatalogDP entry rather than a bespoke Module.
 
-POWERTRAIN (12):
-    engine, air_intake, exhaust_system, engine_cooling,
-    engine_lubrication, fuel_system, transmission, final_drive,
-    electric_motor, battery_pack, power_electronics, battery_cooling
+The classic automotive "weight death spiral" (vehicle mass -> required
+power -> engine / motor / battery / fuel mass -> vehicle mass) and the
+BEV energy spiral (mass -> consumption -> battery size -> mass) are both
+closed by Kleene iteration on the monotone constraint network built by
+System.
 
-CHASSIS (7):
-    body_shell, front_suspension, rear_suspension, front_brakes,
-    rear_brakes, steering, wheels_tires
+Outer mission (functionality)   Outer resources
+    passenger_capacity (people)     production_cost      (USD)
+    cargo_volume       (L)          curb_weight          (kg)
+    max_speed          (km/h)       energy_per_100km     (kWh, ICE+EV unified)
+    target_range       (km)         fuel_per_100km       (L)
+    accel_0_100        (s)          co2_per_km           (g/km, tailpipe)
+                                    durability           (km to major overhaul)
 
-INTERIOR / AUX (3):
-    seats, hvac, infotainment_safety
+The unified energy metric is *primary energy input* per 100 km (fuel
+lower-heating-value plus battery/grid electricity). This is why an ICE
+lands near 50-60 kWh/100 km while a BEV lands near 14-18 kWh/100 km: the
+combustion path throws away most of the fuel's chemical energy as heat.
 
-Outer mission (functionality)
------------------------------
+SOURCES (values added or spot-checked against public data, 2024-2025)
+--------------------------------------------------------------------
+* Battery pack price 115 USD/kWh (volume-weighted global average) and
+  BEV-pack 97 USD/kWh -- BloombergNEF 2024 Lithium-Ion Battery Price
+  Survey, 10 Dec 2024.
+  https://about.bnef.com/insights/clean-transport/lithium-ion-battery-pack-prices-see-largest-drop-since-2017-falling-to-115-per-kilowatt-hour-bloombergnef/
+* Pack-level gravimetric energy density: LFP 125-145, NMC 140-180 Wh/kg
+  (130 Wh/kg blended baseline used here) -- Wassiliadis et al., "From
+  Cell to Pack", World Electric Vehicle Journal 16(9):484, 2025.
+  https://www.mdpi.com/2032-6653/16/9/484
+* Gasoline lower heating value ~34 MJ/L (8.95 kWh/L used), density
+  0.745 kg/L, CO2 2.31 kg/L burned -- UBC Physics "Fossil Fuels for
+  Transport" (46.4 MJ/kg, 0.737 kg/L -> 34.2 MJ/L; 2.36 kg CO2/L).
+  https://c21.phas.ubc.ca/article/fossil-fuels-for-transport/
+* 4-cylinder engine dry mass: 1.5 L ~110-116 kg, 2.0 L ~136-150 kg
+  (turbo/ancillaries add mass) -- industry engine-weight references.
+  https://autopartswd.com/car-engine-weight-guide/
+* Compact-car curb mass ~1290-1560 kg (2024 Toyota Corolla) -- KBB.
+  https://www.kbb.com/toyota/corolla/2024/specs/
+* Compact BEV real-world consumption ~14-16 kWh/100 km (efficient
+  compacts); half of the EPA fleet sits 12-16 kWh/100 km -- InsideEVs
+  2024 consumption ranking / EPA fuel-economy data.
+  https://insideevs.com/news/709706/electric-cars-energy-consumption-ranking/
+* Diesel LHV 9.94 kWh/L (35.8 MJ/L), density 0.832 kg/L, CO2 2.68 kg/L
+  -- U. Waterloo carbon-pricing heating-value note.
+  https://uwaterloo.ca/centre-advanced-science-education/news/gasoline-and-diesel-fuel-carbon-pricing-and-heating-values
+* Mission spec (5 seats, 370 L, 170 km/h, 500 km, 11.5 s 0-100) is a
+  compact C-segment target, bracketed by the Corolla figures above.
 
-    passenger_capacity  (people)
-    cargo_volume        (L)
-    max_speed           (km/h)
-    range               (km, single tank or charge)
-    accel_0_100         (s, target 0-100 km/h time)
-    max_payload         (kg, passengers + cargo + occasional)
+Component masses/costs/efficiencies not individually footnoted are kept
+from the original scaffold and lie within the published ranges of the
+sources above (Bosch Automotive Handbook 2022; ICCT EV cost work; EPA
+Automotive Trends). They are illustrative, not OEM-specific: the MCDP
+framework is what is being validated; the numbers serve the framework.
 
-Outer resources
----------------
-
-    production_cost            (USD)
-    curb_weight                (kg)
-    energy_per_100km           (kWh, unified ICE + EV metric)
-    co2_per_km                 (g/km, tailpipe only)
-    maintenance_per_year       (USD)
-    durability_km              (km until major overhaul)
-
-Parameter calibration
----------------------
-
-All component-level numbers are drawn from current automotive
-engineering practice and published references (Genta, "Motor
-Vehicle Dynamics"; SAE technical papers; EPA fuel-economy data;
-Bosch Automotive Handbook; ICCT vehicle cost study; 2024-2025 OEM
-disclosures). Values are within published ranges for the relevant
-technology level but are not production-precision for any specific
-vehicle. The framework is what's being validated; the numbers serve
-the framework.
-
-Architectures
--------------
-
-The architecture catalog has 12 entries covering the modern
-passenger-vehicle technology spectrum. Each entry pre-selects
-discrete catalog choices (engine, transmission, motor topology,
-battery strategy) and lets the parametric modules size everything
-else from mission demand via the Kleene cycle.
-
-References
-----------
-
-[1] G. Genta and L. Morello, "The Automotive Chassis", Springer.
-[2] H. Heisler, "Advanced Vehicle Technology", Butterworth-Heinemann.
-[3] Bosch, "Automotive Handbook", 11th ed., 2022.
-[4] ICCT, "Electric vehicle cost evolution to 2030", 2024.
-[5] BNEF, "Lithium-ion battery price survey", 2024 ($115/kWh pack).
-[6] EPA, "Fuel Economy Guide", 2024 model year data.
-[7] SAE J1349 for engine power rating conventions.
-
-Run:  python -m examples.17_full_car
-Expected output: none. This module defines the full-car subsystem catalogs,
-parametric modules, architecture table, and physics helpers so they can be
-imported; it does not yet assemble and solve a System, so importing or
-running it produces no console output. See 17_car_codesign.py for a
-complete, runnable vehicle co-design over the same problem.
+Run:  python -m examples.24_car_catalog_codesign
+Expected output: per-architecture feasibility over the 12-row table
+(feasible / infeasible), the cheapest feasible design per architecture
+with its curb mass, unified energy/100 km and tailpipe CO2, a Pareto
+front over (cost, energy/100 km, mass), and a comparison table grouped
+by ICE / MHEV / FHEV / PHEV / REEV / BEV. Runs in a few seconds.
 """
 from __future__ import annotations
 
@@ -175,9 +169,9 @@ ENGINE_R = Ports({
 })
 
 
-def make_engine_dp():
+def make_engine_dp(rows=ENGINE_CATALOG):
     entries = []
-    for (name, disp, pkw, ptq, ftype, eff, wt, cost, dur) in ENGINE_CATALOG:
+    for (name, disp, pkw, ptq, ftype, eff, wt, cost, dur) in rows:
         # Heat rejection at peak power: P_heat = P_mech * (1/eff - 1).
         # The "none_ev" engine produces zero heat.
         if eff < 1.0:
@@ -362,11 +356,14 @@ class FuelSystem(Module):
         dens   = max(0.0, float(f["fuel_density"]))
         max_l  = rng * cons / 100.0
         if max_l < 0.5:
+            # Same durability as a sized tank: a value that FELL once the
+            # (mass-coupled) fuel demand crossed this threshold would be
+            # non-monotone and break the Kleene feedback loop.
             return {
                 "fuel_weight_kg":     0.0,
                 "fuel_cost_USD":      0.0,
                 "max_fuel_L":         0.0,
-                "fuel_durability_km": 1_000_000.0,
+                "fuel_durability_km": 300_000.0,
             }
         avg_fuel_kg = 0.9 * max_l * dens
         hw_kg   = 4.0 + 0.5 * max_l
@@ -406,9 +403,9 @@ TRANSMISSION_R = Ports({
 })
 
 
-def make_transmission_dp():
+def make_transmission_dp(rows=TRANSMISSION_CATALOG):
     entries = []
-    for (name, ratio, ptq, eff, wt, cost, dur, _clutch) in TRANSMISSION_CATALOG:
+    for (name, ratio, ptq, eff, wt, cost, dur, _clutch) in rows:
         entries.append(CatalogEntry(
             provides={"trans_peak_torque_Nm": ptq},
             costs={
@@ -491,9 +488,9 @@ EMOTOR_R = Ports({
 })
 
 
-def make_emotor_dp():
+def make_emotor_dp(rows=EMOTOR_CATALOG):
     entries = []
-    for (name, pkw, ptq, wt, cost, eff, dur) in EMOTOR_CATALOG:
+    for (name, pkw, ptq, wt, cost, eff, dur) in rows:
         # Heat at peak: motor loss is (1 - eff) * P_peak
         heat = pkw * (1.0 - eff) if eff < 1.0 else 0.0
         entries.append(CatalogEntry(
@@ -531,10 +528,11 @@ class BatteryPack(Module):
        battery_volume_L
        battery_durability_km   (typically ~1500 cycles * useful range)
 
-    Calibration follows BNEF 2024 cost survey ($115/kWh pack-level)
-    and current production cell-pack specific energy (150 Wh/kg
-    pack-level for NMC, ~110 Wh/kg for LFP). We use a blended
-    130 Wh/kg / $130/kWh as a representative 2025 baseline.
+    Calibration follows the BNEF 2024 Lithium-Ion Battery Price Survey
+    (volume-weighted pack average $115/kWh; BEV packs $97/kWh) and
+    pack-level specific energy from Wassiliadis et al. 2025 (LFP
+    125-145, NMC 140-180 Wh/kg). We use a blended 130 Wh/kg / $115/kWh
+    as a representative 2024-2025 baseline. See module SOURCES block.
     """
     F = Ports({
         "target_battery_kWh":  Reals(unit="kWh"),
@@ -549,7 +547,7 @@ class BatteryPack(Module):
     })
 
     def __init__(self, specific_energy_Wh_per_kg: float = 130.0,
-                 cost_USD_per_kWh: float = 130.0,
+                 cost_USD_per_kWh: float = 115.0,  # BNEF 2024 pack avg
                  max_c_rate: float = 3.0):
         self.spec_energy = float(specific_energy_Wh_per_kg)
         self.cost_per_kwh = float(cost_USD_per_kWh)
@@ -653,9 +651,12 @@ class BatteryCooling(Module):
 
     def h(self, f):
         kwh = max(0.0, float(f["battery_capacity_kWh"]))
+        # Durability is held constant across pack sizes: a value that
+        # dropped as the (fed-back) pack grew would be non-monotone and
+        # break the Kleene feedback loop. Weight/cost/aux still scale up.
         if kwh < 0.5:
             return {"bcool_weight_kg": 0.0, "bcool_cost_USD": 0.0,
-                    "bcool_aux_kW": 0.0, "bcool_durability_km": 1_000_000.0}
+                    "bcool_aux_kW": 0.0, "bcool_durability_km": 250_000.0}
         if kwh < 5.0:
             # Small pack: passive air or minimal loop
             return {"bcool_weight_kg": 2.0 + 0.5 * kwh,
@@ -707,9 +708,9 @@ BODY_R = Ports({
 })
 
 
-def make_body_dp():
+def make_body_dp(rows=BODY_CATALOG):
     entries = []
-    for (name, n_seats, cargo, wt, cost, cd, fa, dur) in BODY_CATALOG:
+    for (name, n_seats, cargo, wt, cost, cd, fa, dur) in rows:
         entries.append(CatalogEntry(
             provides={
                 "passenger_capacity": n_seats,
@@ -751,9 +752,9 @@ SUSP_R = Ports({
 })
 
 
-def make_suspension_dp(name_suffix: str = ""):
+def make_suspension_dp(name_suffix: str = "", rows=SUSPENSION_CATALOG):
     entries = []
-    for (name, load, wt, cost, comf, dur) in SUSPENSION_CATALOG:
+    for (name, load, wt, cost, comf, dur) in rows:
         entries.append(CatalogEntry(
             provides={"axle_load_kg": load},
             costs={
@@ -804,7 +805,11 @@ class Brakes(Module):
         # -> ~18 kg, ~$560. Coefficients tuned to that target.
         wt   = 4.0 + 0.010 * ke
         cost = 80.0 + 0.35 * ke
-        dur  = max(60_000.0, 150_000.0 - 0.02 * ke)
+        # Durability depends on the axle (pad/rotor duty), NOT on the
+        # fed-back curb mass: a resource that FELL as the design mass rose
+        # would be non-monotone and break the Kleene feedback (the loop
+        # requires every fed-back R port to be non-decreasing in F).
+        dur  = 120_000.0 if self.axle == "front" else 150_000.0
         return {
             "brake_weight_kg":     wt,
             "brake_cost_USD":      cost,
@@ -868,9 +873,9 @@ TIRES_R = Ports({
 })
 
 
-def make_tires_dp():
+def make_tires_dp(rows=TIRE_CATALOG):
     entries = []
-    for (name, load, vmax, wt, cost, crr, _grip, dur) in TIRE_CATALOG:
+    for (name, load, vmax, wt, cost, crr, _grip, dur) in rows:
         entries.append(CatalogEntry(
             provides={"tire_load_kg": load, "tire_max_kmh": vmax},
             costs={
@@ -978,10 +983,10 @@ INFO_R = Ports({
 })
 
 
-def make_infotainment_dp():
+def make_infotainment_dp(rows=INFOTAINMENT_CATALOG):
     entries = []
     # trim_demand ranges 1.0/1.2/1.4 (basic/mid/premium)
-    for (name, wt, cost, dur, safety) in INFOTAINMENT_CATALOG:
+    for (name, wt, cost, dur, safety) in rows:
         entries.append(CatalogEntry(
             provides={"trim_demand": safety},
             costs={
@@ -1094,3 +1099,502 @@ def architecture_by_name(name: str) -> dict:
                 "awd": awd, "is_diesel": diesel,
             }
     raise KeyError(name)
+
+
+# Powertrain-class label for each architecture, used only for grouping the
+# final comparison table (ICE / MHEV / FHEV / PHEV / REEV / BEV).
+ARCH_CLASS = {
+    "ICE_economy": "ICE", "ICE_family": "ICE", "ICE_premium": "ICE",
+    "ICE_performance": "ICE", "Diesel_long_range": "ICE",
+    "MHEV_48V": "MHEV", "HEV_full": "FHEV",
+    "PHEV_small": "PHEV", "PHEV_large": "PHEV",
+    "REEV": "REEV", "BEV_long_range": "BEV", "BEV_AWD_perf": "BEV",
+}
+
+
+# ===========================================================================
+# SECTION 6: MISSION AND MODEL CONSTANTS
+# ===========================================================================
+#
+# One representative compact C-segment mission drives the whole study. The
+# targets are bracketed by the 2024 Toyota Corolla figures cited in the
+# module SOURCES block (curb ~1290-1560 kg, 0-100 ~10-11 s).
+
+MISSION = {
+    "passenger_capacity": 5,       # people
+    "cargo_volume_L":     370.0,   # L (compact-hatch class)
+    "max_speed_kmh":      170.0,   # km/h
+    "target_range_km":    500.0,   # km per tank or charge
+    "accel_0_100_s":      11.5,    # s, 0-100 km/h target
+}
+
+# Drivetrain-efficiency and duty constants (dimensionless unless noted).
+# These are the only "added" tuning constants; each is grounded below.
+CRUISE_EFF_FACTOR = 0.80   # engine cruise eff as fraction of peak BSFC eff
+                           # (part-load penalty at steady 90 km/h; Bosch
+                           #  Automotive Handbook BSFC maps, engine runs
+                           #  below its best point at light cruise load)
+PE_EFF            = 0.95    # inverter + DC-DC combined (Larminie & Lowry,
+                           #  "Electric Vehicle Technology Explained", 2ed)
+ALT_EFF           = 0.60    # alternator electrical-to-mechanical (Bosch
+                           #  Automotive Handbook; belt-driven claw-pole)
+AUX_DUTY          = 0.30    # cruise duty factor on peak auxiliary loads
+                           #  (HVAC/fans/pumps rarely run at peak at steady
+                           #  cruise; 0.3 keeps derived L/100km realistic)
+ACCEL_PEAK_FACTOR = 1.6    # peak/average power ratio over a 0-100 pull
+                           #  (energy-balance average x 1.6; a full-throttle
+                           #  pull is not a constant-power event)
+FINAL_DRIVE_REDUCTION = 6.0  # representative engine/motor -> axle torque
+                             #  multiplier (gearbox x final drive), tuned so
+                             #  a 250 Nm engine gives ~1500 Nm axle torque,
+                             #  matching the FinalDrive calibration comment
+
+ASSEMBLY_USD_PER_KG = 1.5   # labour + paint + BIW + final assembly overhead
+                            #  (per-kg proxy, same convention as ex. 17)
+
+
+def _fuel_props(ftype: str):
+    """(LHV kWh/L, density kg/L, CO2 kg/L) for a fuel-type tag."""
+    if ftype == "gas":
+        return LHV_GASOLINE_KWH_PER_L, DENSITY_GASOLINE, CO2_GASOLINE_KG_PER_L
+    if ftype == "diesel":
+        return LHV_DIESEL_KWH_PER_L, DENSITY_DIESEL, CO2_DIESEL_KG_PER_L
+    return 1.0, 0.0, 0.0   # "none" (EV): no liquid fuel
+
+
+# Module bookkeeping: (system name, weight port, cost port, durability port).
+# Used by the mass / cost / durability aggregation lambdas.
+MODULE_PORTS = [
+    ("engine",       "engine_weight_kg",       "engine_cost_USD",       "engine_durability_km"),
+    ("intake",       "intake_weight_kg",       "intake_cost_USD",       "intake_durability_km"),
+    ("exhaust",      "exhaust_weight_kg",       "exhaust_cost_USD",      "exhaust_durability_km"),
+    ("engine_cool",  "engine_cool_weight_kg",   "engine_cool_cost_USD",  "engine_cool_durability_km"),
+    ("lube",         "lube_weight_kg",          "lube_cost_USD",         "lube_durability_km"),
+    ("fuel",         "fuel_weight_kg",          "fuel_cost_USD",         "fuel_durability_km"),
+    ("trans",        "trans_weight_kg",         "trans_cost_USD",        "trans_durability_km"),
+    ("final_drive",  "final_drive_weight_kg",   "final_drive_cost_USD",  "final_drive_durability_km"),
+    ("motor",        "motor_weight_kg",         "motor_cost_USD",        "motor_durability_km"),
+    ("battery",      "battery_weight_kg",       "battery_cost_USD",      "battery_durability_km"),
+    ("pe",           "pe_weight_kg",            "pe_cost_USD",           "pe_durability_km"),
+    ("bcool",        "bcool_weight_kg",         "bcool_cost_USD",        "bcool_durability_km"),
+    ("body",         "body_weight_kg",          "body_cost_USD",         "body_durability_km"),
+    ("susp_front",   "susp_weight_kg",          "susp_cost_USD",         "susp_durability_km"),
+    ("susp_rear",    "susp_weight_kg",          "susp_cost_USD",         "susp_durability_km"),
+    ("brakes_front", "brake_weight_kg",         "brake_cost_USD",        "brake_durability_km"),
+    ("brakes_rear",  "brake_weight_kg",         "brake_cost_USD",        "brake_durability_km"),
+    ("steering",     "steering_weight_kg",      "steering_cost_USD",     "steering_durability_km"),
+    ("tires",        "tires_weight_kg",         "tires_cost_USD",        "tires_durability_km"),
+    ("seats",        "seats_weight_kg",         "seats_cost_USD",        "seats_durability_km"),
+    ("hvac",         "hvac_weight_kg",          "hvac_cost_USD",         "hvac_durability_km"),
+    ("info",         "info_weight_kg",          "info_cost_USD",         "info_durability_km"),
+]
+
+
+# ===========================================================================
+# SECTION 7: SYSTEM ASSEMBLY FROM ONE ARCHITECTURE ROW
+# ===========================================================================
+
+
+def build_architecture(arch: dict, mission: Mapping[str, float], *,
+                       body_row, susp_row, tire_row,
+                       info_row=INFOTAINMENT_CATALOG[0]) -> Any:
+    """Assemble a solvable System for one ARCHITECTURE_CATALOG row.
+
+    The architecture fixes the discrete powertrain (engine / transmission /
+    e-motor are one-entry CatalogDPs sliced from the master catalogs). The
+    chassis catalog rows (body / suspension / tyre) are passed in one at a
+    time by the sweep in :func:`solve_architecture`, so each System is
+    single-valued and its Kleene loop carries only monotone quantities.
+    Every parametric module (cooling, fuel, battery, brakes, steering, ...)
+    sizes itself from the mission and from the converged curb mass through
+    the loop.
+
+    Two coupled cycles are closed by the loop:
+      * mass spiral -- every load-bearing module reads total curb mass;
+      * energy/battery spiral -- consumption depends on mass, and for BEVs
+        the battery is sized to range x consumption, feeding back to mass.
+    """
+    # --- Known constants pulled from the pre-selected catalog rows -------
+    eng = ENGINE_CATALOG[arch["engine_idx"]]
+    trn = TRANSMISSION_CATALOG[arch["transmission_idx"]]
+    em  = EMOTOR_CATALOG[arch["emotor_idx"]]
+    disp    = eng[1]
+    pkw_eng = eng[2]
+    ptq_eng = eng[3]
+    ftype   = eng[4]
+    eff_eng = eng[5]
+    eff_trn = trn[3]
+    pkw_em  = em[1]
+    ptq_em  = em[2]
+    eff_em  = em[5]
+    ice_f   = arch["ice_fraction"]
+    lhv_kWh_per_L, fuel_dens, co2_kg_per_L = _fuel_props(ftype)
+    engine_heat_kW = pkw_eng * (1.0 / eff_eng - 1.0) if eff_eng < 1.0 else 0.0
+
+    sys = System(arch["name"])
+
+    # --- Outer functionality (mission) ----------------------------------
+    sys.provides("passenger_capacity", unit="")
+    sys.provides("cargo_volume_L",     unit="L")
+    sys.provides("max_speed_kmh",      unit="km/h")
+    sys.provides("target_range_km",    unit="km")
+
+    # --- Outer resources (macro objectives) -----------------------------
+    sys.requires("production_cost_USD",   unit="USD")
+    sys.requires("curb_weight_kg",        unit="kg")
+    sys.requires("energy_per_100km_kWh",  unit="kWh")
+    sys.requires("fuel_per_100km_L",      unit="L")
+    sys.requires("co2_per_km",            unit="g/km")
+    sys.requires("durability_km",         unit="km")
+
+    # --- Modules --------------------------------------------------------
+    # Powertrain: engine / transmission / motor are single-entry catalogs
+    # sliced from the master catalogs by the architecture's indices.
+    sys.add("engine", make_engine_dp([eng]))
+    sys.add("intake", AirIntake(boost_pressure=arch["boost_pressure"]))
+    sys.add("exhaust", ExhaustSystem(is_diesel=arch["is_diesel"]))
+    sys.add("engine_cool", EngineCooling())
+    sys.add("lube", EngineLubrication())
+    sys.add("fuel", FuelSystem())
+    sys.add("trans", make_transmission_dp([trn]))
+    sys.add("final_drive", FinalDrive(awd=arch["awd"]))
+    sys.add("motor", make_emotor_dp([em]))
+    sys.add("battery", BatteryPack())
+    sys.add("pe", PowerElectronics(charger_kW=arch["onboard_charger_kW"]))
+    sys.add("bcool", BatteryCooling())
+
+    # Chassis: one catalog row each, chosen by the sweep in
+    # solve_architecture (keeps the System single-valued / monotone).
+    sys.add("body", make_body_dp([body_row]))
+    sys.add("susp_front", make_suspension_dp("_front", [susp_row]))
+    sys.add("susp_rear", make_suspension_dp("_rear", [susp_row]))
+    sys.add("brakes_front", Brakes(axle="front"))
+    sys.add("brakes_rear", Brakes(axle="rear"))
+    sys.add("steering", Steering())
+    sys.add("tires", make_tires_dp([tire_row]))
+
+    # Interior / auxiliary.
+    sys.add("seats", Seats(trim_level=1.0))
+    sys.add("hvac", HVAC())
+    sys.add("info", make_infotainment_dp([info_row]))
+
+    # --- Loop helpers (functions of the module-R context x) -------------
+
+    def total_mass(x):
+        m = DRIVER_MASS
+        for name, wport, _c, _d in MODULE_PORTS:
+            m += x[f"{name}.{wport}"]
+        return m
+
+    def peak_power_kW(x):
+        """Combined powertrain peak demand: max of top-speed road load and
+        acceleration, referred to the powertrain output through the box."""
+        m = total_mass(x)
+        cd  = x["body.drag_coefficient"]
+        A   = x["body.frontal_area_m2"]
+        crr = x["tires.rolling_resistance"]
+        p_top = 1.10 * cruise_propulsive_kW(cd, A, crr, m, 0.0,
+                                            mission["max_speed_kmh"])
+        v = 100.0 / 3.6
+        p_accel = ACCEL_PEAK_FACTOR * 0.5 * m * v ** 2 \
+            / mission["accel_0_100_s"] / 1000.0
+        return max(p_top, p_accel) / max(eff_trn, 0.5)
+
+    def accessory_cruise_kW(x):
+        """Continuous electrical accessory draw at cruise (kW)."""
+        peak = (x["hvac.hvac_aux_kW"] + x["steering.steering_aux_kW"]
+                + x["engine_cool.engine_cool_aux_kW"] + x["bcool.bcool_aux_kW"])
+        return ACCESSORY_LOAD_KW + AUX_DUTY * peak
+
+    def fuel_power_kW(x):
+        """Primary fuel power at cruise (kW of fuel LHV). Zero for a BEV."""
+        if ice_f <= 0.0 or lhv_kWh_per_L <= 0.0:
+            return 0.0
+        cd  = x["body.drag_coefficient"]
+        A   = x["body.frontal_area_m2"]
+        crr = x["tires.rolling_resistance"]
+        p_tractive = cruise_propulsive_kW(cd, A, crr, total_mass(x), 0.0)
+        eng_cruise_eff = max(CRUISE_EFF_FACTOR * eff_eng, 0.05)
+        ice_tractive = ice_f * p_tractive
+        fuel_kW = ice_tractive / (eng_cruise_eff * max(eff_trn, 0.5))
+        # Accessory share carried by the engine via the alternator.
+        acc_fuel = ice_f * accessory_cruise_kW(x) / (ALT_EFF * eng_cruise_eff)
+        return fuel_kW + acc_fuel
+
+    def electric_power_kW(x):
+        """Primary electrical power at cruise (kW from battery/grid)."""
+        cd  = x["body.drag_coefficient"]
+        A   = x["body.frontal_area_m2"]
+        crr = x["tires.rolling_resistance"]
+        p_tractive = cruise_propulsive_kW(cd, A, crr, total_mass(x), 0.0)
+        elec_tractive = (1.0 - ice_f) * p_tractive
+        drive_eff = max(eff_em, 0.5) * PE_EFF * max(eff_trn, 0.5)
+        elec_kW = elec_tractive / drive_eff if elec_tractive > 0.0 else 0.0
+        # Accessory share carried electrically (battery/12V from HV pack).
+        elec_kW += (1.0 - ice_f) * accessory_cruise_kW(x)
+        return elec_kW
+
+    def fuel_per_100km_L(x):
+        if lhv_kWh_per_L <= 0.0:
+            return 0.0
+        e_kWh_100 = fuel_power_kW(x) * 100.0 / CRUISE_SPEED_KMH
+        return e_kWh_100 / lhv_kWh_per_L
+
+    def energy_per_100km(x):
+        """Unified primary energy: fuel LHV + electricity, per 100 km."""
+        return (fuel_power_kW(x) + electric_power_kW(x)) \
+            * 100.0 / CRUISE_SPEED_KMH
+
+    def battery_target_kWh(x):
+        floor = arch["target_battery_kWh"]
+        if ice_f <= 0.0:  # pure BEV: size to full electric range
+            need = mission["target_range_km"] * energy_per_100km(x) / 100.0
+            return max(floor, need)
+        return floor
+
+    # --- Mission propagation (outer F -> module F) ----------------------
+    sys.constrain("body.passenger_capacity",
+                  lambda x, v=mission["passenger_capacity"]: v)
+    sys.constrain("body.cargo_volume_L",
+                  lambda x, v=mission["cargo_volume_L"]: v)
+    sys.constrain("seats.passenger_capacity",
+                  lambda x, v=mission["passenger_capacity"]: v)
+    sys.constrain("hvac.passenger_capacity",
+                  lambda x, v=mission["passenger_capacity"]: v)
+    sys.constrain("tires.tire_max_kmh",
+                  lambda x, v=mission["max_speed_kmh"]: v)
+    sys.constrain("brakes_front.max_speed_kmh",
+                  lambda x, v=mission["max_speed_kmh"]: v)
+    sys.constrain("brakes_rear.max_speed_kmh",
+                  lambda x, v=mission["max_speed_kmh"]: v)
+    sys.constrain("info.trim_demand", lambda x: 1.0)  # basic trim floor
+
+    # --- Powertrain demands (mostly known constants; power is mass-coupled)
+    sys.constrain("engine.ice_power_demand_kW",
+                  lambda x: ice_f * peak_power_kW(x))
+    sys.constrain("motor.motor_power_demand_kW",
+                  lambda x: (1.0 - ice_f) * peak_power_kW(x))
+    sys.constrain("motor.motor_torque_demand_Nm",
+                  lambda x: 2.0 * (1.0 - ice_f) * peak_power_kW(x))
+    sys.constrain("intake.engine_peak_power_kW", lambda x, p=pkw_eng: p)
+    sys.constrain("exhaust.displacement_L", lambda x, d=disp: d)
+    sys.constrain("engine_cool.heat_rejection_kW",
+                  lambda x, q=engine_heat_kW: q)
+    sys.constrain("lube.displacement_L", lambda x, d=disp: d)
+    # Transmission/final-drive torque: engine torque, or motor torque per
+    # driven axle when there is no engine (pure EV).
+    n_axles = 2.0 if arch["awd"] else 1.0
+    trans_torque = max(ptq_eng, ptq_em / n_axles)
+    axle_torque = max(ptq_eng, ptq_em / n_axles) * FINAL_DRIVE_REDUCTION
+    sys.constrain("trans.trans_peak_torque_Nm", lambda x, t=trans_torque: t)
+    sys.constrain("final_drive.peak_axle_torque_Nm",
+                  lambda x, t=axle_torque: t)
+    sys.constrain("pe.motor_peak_power_kW", lambda x, p=pkw_em: p)
+    sys.constrain("battery.motor_peak_power_kW", lambda x, p=pkw_em: p)
+    sys.constrain("battery.target_battery_kWh", battery_target_kWh)
+    sys.constrain("bcool.battery_capacity_kWh",
+                  lambda x: x["battery.battery_capacity_kWh"])
+
+    # --- Fuel system (range fixed, consumption mass-coupled) ------------
+    sys.constrain("fuel.target_range_km",
+                  lambda x, r=mission["target_range_km"]: r)
+    sys.constrain("fuel.fuel_per_100km_L", fuel_per_100km_L)
+    sys.constrain("fuel.fuel_density", lambda x, d=fuel_dens: d)
+
+    # --- Mass spiral: load-bearing modules read total curb mass --------
+    sys.constrain("susp_front.axle_load_kg", lambda x: 0.55 * total_mass(x))
+    sys.constrain("susp_rear.axle_load_kg",  lambda x: 0.45 * total_mass(x))
+    sys.constrain("steering.front_axle_load_kg",
+                  lambda x: 0.55 * total_mass(x))
+    # Per-tyre static load = curb mass / 4 (four contact patches). The
+    # tyre catalog's max_load_kg is a per-tyre load rating.
+    sys.constrain("tires.tire_load_kg", lambda x: 0.25 * total_mass(x))
+    sys.constrain("brakes_front.vehicle_mass_kg", total_mass)
+    sys.constrain("brakes_rear.vehicle_mass_kg", total_mass)
+
+    # --- Outer resource aggregations -----------------------------------
+    def production_cost(x):
+        c = 0.0
+        for name, _w, cport, _d in MODULE_PORTS:
+            c += x[f"{name}.{cport}"]
+        return c + ASSEMBLY_USD_PER_KG * total_mass(x)
+
+    def durability(x):
+        # Harmonic mean of the life-limiting subsystems (whichever wears
+        # out first dominates the vehicle's useful life).
+        keys = [
+            "engine.engine_durability_km", "trans.trans_durability_km",
+            "motor.motor_durability_km", "battery.battery_durability_km",
+            "body.body_durability_km", "susp_front.susp_durability_km",
+            "tires.tires_durability_km", "exhaust.exhaust_durability_km",
+        ]
+        inv = 0.0
+        for k in keys:
+            v = max(x[k], 1.0)
+            inv += 1.0 / v
+        return len(keys) / inv if inv > 0 else 0.0
+
+    sys.constrain("production_cost_USD", production_cost)
+    sys.constrain("curb_weight_kg", total_mass)
+    sys.constrain("energy_per_100km_kWh", energy_per_100km)
+    sys.constrain("fuel_per_100km_L", fuel_per_100km_L)
+    sys.constrain("co2_per_km",
+                  lambda x, c=co2_kg_per_L: fuel_per_100km_L(x) * c * 10.0)
+    sys.constrain("durability_km", durability)
+
+    return sys.build()
+
+
+# ===========================================================================
+# SECTION 8: SOLVE LOOP OVER THE ARCHITECTURE TABLE
+# ===========================================================================
+
+
+def _eligible_bodies(mission: Mapping[str, float]):
+    """Body catalog rows that can seat/carry the mission."""
+    return [r for r in BODY_CATALOG
+            if r[1] >= mission["passenger_capacity"]
+            and r[2] >= mission["cargo_volume_L"]]
+
+
+def _eligible_tires(mission: Mapping[str, float]):
+    """Tire catalog rows rated for the mission top speed."""
+    return [r for r in TIRE_CATALOG if r[2] >= mission["max_speed_kmh"]]
+
+
+def _solve_one(arch, mission, body_row, susp_row, tire_row, max_iter):
+    dp = build_architecture(arch, mission, body_row=body_row,
+                            susp_row=susp_row, tire_row=tire_row)
+    res = solve(dp, dict(
+        passenger_capacity=mission["passenger_capacity"],
+        cargo_volume_L=mission["cargo_volume_L"],
+        max_speed_kmh=mission["max_speed_kmh"],
+        target_range_km=mission["target_range_km"],
+    ), max_iter=max_iter, verbose=0)
+    if not res.feasible or not res.antichain:
+        return None
+    finite = [dict(p) for p in res.antichain.points
+              if all(math.isfinite(dict(p).get(k, float("inf")))
+                     for k in ("production_cost_USD", "curb_weight_kg",
+                               "energy_per_100km_kWh"))]
+    if not finite:
+        return None
+    return min(finite, key=lambda p: p["production_cost_USD"])
+
+
+def solve_architecture(arch: dict, mission: Mapping[str, float],
+                       *, max_iter: int = 200):
+    """Sweep the eligible chassis catalog rows and return the best design.
+
+    For the pre-selected powertrain of ``arch``, this tries every eligible
+    (body, suspension, tyre) combination -- each a single-valued System --
+    and keeps the cheapest feasible converged design. Returns
+    (feasible: bool, best_point_or_None).
+    """
+    best = None
+    for body_row in _eligible_bodies(mission):
+        for susp_row in SUSPENSION_CATALOG:
+            for tire_row in _eligible_tires(mission):
+                pt = _solve_one(arch, mission, body_row, susp_row,
+                                tire_row, max_iter)
+                if pt is None:
+                    continue
+                if best is None or \
+                   pt["production_cost_USD"] < best["production_cost_USD"]:
+                    best = pt
+    return (best is not None), best
+
+
+def _pareto(points: Sequence[Tuple[str, dict]],
+            axes: Sequence[str]) -> List[Tuple[str, dict]]:
+    """Non-dominated (label, point) pairs over the given minimise-axes."""
+    out = []
+    pts = [p for _, p in points]
+    for label, p in points:
+        dominated = False
+        for q in pts:
+            if q is p:
+                continue
+            if all(q[k] <= p[k] for k in axes) \
+               and any(q[k] < p[k] for k in axes):
+                dominated = True
+                break
+        if not dominated:
+            out.append((label, p))
+    return out
+
+
+def main():
+    print("=" * 74)
+    print("Example 24: catalog-driven car co-design from one architecture table")
+    print("=" * 74)
+    print(f"Mission: {mission_str(MISSION)}")
+
+    solved: List[Tuple[str, dict]] = []   # (arch_name, best_point)
+
+    print("\n--- Per-architecture feasibility (cheapest feasible design) ---")
+    header = (f"  {'Architecture':<18}{'cls':<6}{'feas':<6}"
+              f"{'cost$':>9}{'mass kg':>9}{'kWh/100':>9}"
+              f"{'L/100':>7}{'CO2':>7}")
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for entry in ARCHITECTURE_CATALOG:
+        arch = architecture_by_name(entry[0])
+        feasible, best = solve_architecture(arch, MISSION)
+        cls = ARCH_CLASS[arch["name"]]
+        if not feasible:
+            print(f"  {arch['name']:<18}{cls:<6}{'no':<6}"
+                  f"{'-':>9}{'-':>9}{'-':>9}{'-':>7}{'-':>7}")
+            continue
+        solved.append((arch["name"], best))
+        print(f"  {arch['name']:<18}{cls:<6}{'yes':<6}"
+              f"{best['production_cost_USD']:>9,.0f}"
+              f"{best['curb_weight_kg']:>9.0f}"
+              f"{best['energy_per_100km_kWh']:>9.1f}"
+              f"{best['fuel_per_100km_L']:>7.1f}"
+              f"{best['co2_per_km']:>7.0f}")
+
+    if not solved:
+        print("\nNo architecture was feasible for this mission.")
+        return solved
+
+    # --- Pareto front over (cost, energy, mass) ------------------------
+    axes = ("production_cost_USD", "energy_per_100km_kWh", "curb_weight_kg")
+    front = _pareto(solved, axes)
+    print("\n--- Pareto front over (cost, energy/100km, mass) ---")
+    for name, p in sorted(front, key=lambda t: t[1]["production_cost_USD"]):
+        print(f"  {name:<18} ${p['production_cost_USD']:>8,.0f}"
+              f"  {p['energy_per_100km_kWh']:>5.1f} kWh/100"
+              f"  {p['curb_weight_kg']:>5.0f} kg")
+
+    # --- Comparison grouped by powertrain class ------------------------
+    print("\n--- Comparison by powertrain class (cheapest feasible each) ---")
+    print(f"  {'class':<6}{'best arch':<18}{'cost$':>9}{'mass kg':>9}"
+          f"{'kWh/100':>9}{'CO2 g/km':>10}")
+    by_class: Dict[str, Tuple[str, dict]] = {}
+    for name, p in solved:
+        cls = ARCH_CLASS[name]
+        if cls not in by_class or \
+           p["production_cost_USD"] < by_class[cls][1]["production_cost_USD"]:
+            by_class[cls] = (name, p)
+    for cls in ("ICE", "MHEV", "FHEV", "PHEV", "REEV", "BEV"):
+        if cls not in by_class:
+            continue
+        name, p = by_class[cls]
+        print(f"  {cls:<6}{name:<18}{p['production_cost_USD']:>9,.0f}"
+              f"{p['curb_weight_kg']:>9.0f}{p['energy_per_100km_kWh']:>9.1f}"
+              f"{p['co2_per_km']:>10.0f}")
+
+    return solved
+
+
+def mission_str(m: Mapping[str, float]) -> str:
+    return (f"{int(m['passenger_capacity'])} seats, "
+            f"{int(m['cargo_volume_L'])} L, "
+            f"{int(m['max_speed_kmh'])} km/h top, "
+            f"{int(m['target_range_km'])} km range, "
+            f"0-100 in {m['accel_0_100_s']:.1f} s")
+
+
+if __name__ == "__main__":
+    main()
