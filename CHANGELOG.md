@@ -428,6 +428,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing ports on each side. Extra `dp1` resource ports not consumed by `dp2`
   remain permitted (the check is a subset, not an equality), matching what
   `h()` actually requires; scalar (non-`Ports`) compositions are unaffected.
+- **Error-message quality audit across `codesign/`.** Every user-reachable
+  `raise` was reviewed against the what/expected/how bar and upgraded to state
+  the failure, interpolate the offending name/value/type, and give a concrete
+  fix, with the correct exception type. `ODE_DP` now also rejects an invalid
+  `mode` at construction (`ValueError` listing `'final_value'`/`'steady_state'`)
+  instead of silently falling back to `final_value`. Covers `AlgebraicDP`,
+  `CatalogDP`, `UncertainDP`, `Parallel`/`Loop` composition, `MCDP.build`,
+  `Ports`/`Discrete`, `StateGrid` and the state axes, the `System` builder, the
+  stage/epoch "no candidates" family, the uncertainty sets/copulas, the online
+  picker resolver, and the `viz` helpers. Message-content regression tests added
+  in `tests/test_validation.py`.
 
 ## [0.1.0] - 2026-05-18
 

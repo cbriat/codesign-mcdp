@@ -265,7 +265,8 @@ def solve_schedule(
         if architectures is None:
             raise ValueError(
                 f"epoch {ep.name!r} has no candidates and no default "
-                f"architecture set was supplied"
+                f"architecture set was supplied. Either set candidates=[...] "
+                f"on the epoch, or pass architectures=[...] to solve_schedule()."
             )
         return architectures
 

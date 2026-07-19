@@ -151,9 +151,17 @@ class MCDP:
     def build(self) -> DesignProblem:
         """Produce a plain DesignProblem (with all declared loops closed)."""
         if not self._provides:
-            raise ValueError("at least one provides() is required")
+            raise ValueError(
+                f"MCDP {self.name!r}: at least one provides() is required "
+                f"before build(). A design problem needs a functionality "
+                f"space. Declare one with m.provides('name', unit=...)."
+            )
         if not self._requires:
-            raise ValueError("at least one requires() is required")
+            raise ValueError(
+                f"MCDP {self.name!r}: at least one requires() is required "
+                f"before build(). A design problem needs a resource space. "
+                f"Declare one with m.requires('name', unit=...)."
+            )
 
         F = Ports(dict(self._provides))
         R = Ports(dict(self._requires))
@@ -167,8 +175,11 @@ class MCDP:
             missing = set(self._requires) - set(self._constraints)
             if missing:
                 raise ValueError(
-                    f"resources {sorted(missing)} declared via requires() "
-                    "have no constraint() or rule() defining them"
+                    f"MCDP {self.name!r}: resource port(s) {sorted(missing)} "
+                    f"declared via requires() have no constraint() or rule() "
+                    f"defining them. Every resource needs an equation. Add "
+                    f"m.constraint({sorted(missing)[0]!r}, lambda f: ...) for "
+                    f"each, or supply a full m.rule(...)."
                 )
             inner = AlgebraicDP(
                 F=F, R=R,

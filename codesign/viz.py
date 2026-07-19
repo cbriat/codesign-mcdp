@@ -111,12 +111,16 @@ def plot_antichain(
         antichain = result
     else:
         raise TypeError(
-            "plot_antichain: result must be a SolveResult, "
-            "UncertaintyResult, or Antichain."
+            f"plot_antichain: result must be a SolveResult, "
+            f"UncertaintyResult, or Antichain, got {type(result).__name__}."
         )
 
     if len(axes) not in (2, 3):
-        raise ValueError("axes must be a sequence of 2 or 3 R-port names.")
+        raise ValueError(
+            f"plot_antichain: axes must be a sequence of 2 or 3 R-port names, "
+            f"got {len(axes)} ({list(axes)}). Antichains are plotted in 2-D "
+            f"or 3-D."
+        )
 
     pts = _extract_points(antichain, axes)
     if not pts:

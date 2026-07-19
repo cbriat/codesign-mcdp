@@ -563,7 +563,10 @@ def _resolve_picker(picker):
     if isinstance(picker, tuple) and len(picker) == 2:
         name, kwargs = picker
         if name not in _PICKERS:
-            raise ValueError(f"unknown picker {name!r}")
+            raise ValueError(
+                f"unknown picker {name!r}; choose from {sorted(_PICKERS)} or "
+                f"pass a callable"
+            )
         return _PICKERS[name], dict(kwargs)
     raise TypeError(f"picker must be a string, tuple, or callable, got {type(picker).__name__}")
 

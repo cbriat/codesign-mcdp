@@ -89,15 +89,39 @@ class Parallel(DesignProblem):
 
     def __init__(self, dp1: DesignProblem, dp2: DesignProblem, name: str | None = None):
         if not isinstance(dp1.F, Ports) or not isinstance(dp2.F, Ports):
-            raise TypeError("Parallel composition needs Ports F on both sides")
+            raise TypeError(
+                f"Parallel composition requires Ports functionality spaces on "
+                f"both sides, got dp1.F={type(dp1.F).__name__} and "
+                f"dp2.F={type(dp2.F).__name__}. par() stacks two DPs' F ports "
+                f"side by side, so each F must be a named Ports bundle. Give "
+                f"both {dp1.name!r} and {dp2.name!r} a Ports F."
+            )
         if not isinstance(dp1.R, Ports) or not isinstance(dp2.R, Ports):
-            raise TypeError("Parallel composition needs Ports R on both sides")
+            raise TypeError(
+                f"Parallel composition requires Ports resource spaces on both "
+                f"sides, got dp1.R={type(dp1.R).__name__} and "
+                f"dp2.R={type(dp2.R).__name__}. par() stacks two DPs' R ports "
+                f"side by side, so each R must be a named Ports bundle. Give "
+                f"both {dp1.name!r} and {dp2.name!r} a Ports R."
+            )
         f_overlap = set(dp1.F.keys()) & set(dp2.F.keys())
         r_overlap = set(dp1.R.keys()) & set(dp2.R.keys())
         if f_overlap:
-            raise ValueError(f"functionality names clash: {f_overlap}")
+            raise ValueError(
+                f"Parallel composition of {dp1.name!r} and {dp2.name!r} needs "
+                f"disjoint functionality port names, but both declare "
+                f"{sorted(f_overlap)}. par() concatenates the two F bundles, so "
+                f"a shared name would collide. Rename the clashing port(s) on "
+                f"one side (e.g. add a suffix)."
+            )
         if r_overlap:
-            raise ValueError(f"resource names clash: {r_overlap}")
+            raise ValueError(
+                f"Parallel composition of {dp1.name!r} and {dp2.name!r} needs "
+                f"disjoint resource port names, but both declare "
+                f"{sorted(r_overlap)}. par() concatenates the two R bundles, so "
+                f"a shared name would collide. Rename the clashing port(s) on "
+                f"one side (e.g. add a suffix)."
+            )
         self.dp1 = dp1
         self.dp2 = dp2
         self.F = Ports({**dp1.F.components, **dp2.F.components})
@@ -144,12 +168,29 @@ class Loop(DesignProblem):
         name: str | None = None,
     ):
         if not isinstance(inner.F, Ports):
-            raise TypeError("Loop needs a Ports functionality space")
+            raise TypeError(
+                f"Loop requires a Ports functionality space on the inner DP "
+                f"{inner.name!r}, got {type(inner.F).__name__}. A loop closes a "
+                f"named feedback axis, which only exists in a named Ports "
+                f"bundle. Give {inner.name!r} a Ports F containing the loop axis."
+            )
         if not isinstance(inner.R, Ports):
-            raise TypeError("Loop needs a Ports resource space")
+            raise TypeError(
+                f"Loop requires a Ports resource space on the inner DP "
+                f"{inner.name!r}, got {type(inner.R).__name__}. A loop closes a "
+                f"named feedback axis, which only exists in a named Ports "
+                f"bundle. Give {inner.name!r} a Ports R containing the loop axis."
+            )
         if axis not in inner.F.components or axis not in inner.R.components:
+            missing_side = "F" if axis not in inner.F.components else "R"
             raise ValueError(
-                f"axis '{axis}' must appear in both F and R of the inner DP"
+                f"Loop axis {axis!r} must appear in both F and R of the inner "
+                f"DP {inner.name!r}, so the resource can be fed back as the "
+                f"functionality. {inner.name!r} has F ports "
+                f"{sorted(inner.F.components)} and R ports "
+                f"{sorted(inner.R.components)}; {axis!r} is missing from "
+                f"{missing_side}. Add {axis!r} to both sides, or pass an axis "
+                f"name that is declared on both."
             )
         self.inner = inner
         self.axis = axis

@@ -72,7 +72,10 @@ def state_get(state: StateVec, axis: str) -> Any:
     for k, v in state:
         if k == axis:
             return v
-    raise KeyError(axis)
+    raise KeyError(
+        f"state vector has no axis {axis!r}; it carries axes "
+        f"{[k for k, _ in state]}"
+    )
 
 
 def state_as_dict(state: StateVec) -> Dict[str, Any]:
@@ -130,7 +133,11 @@ class ContinuousAxis(Axis):
 
     def __post_init__(self) -> None:
         if self.n < 1:
-            raise ValueError("ContinuousAxis needs at least one node")
+            raise ValueError(
+                f"ContinuousAxis {self.name!r} needs at least one node, got "
+                f"n={self.n}. Pass n >= 1 (n=1 yields a single node at "
+                f"lo={self.lo})."
+            )
         if self.n == 1:
             self._nodes = [float(self.lo)]
         else:
@@ -185,7 +192,11 @@ class DiscreteAxis(Axis):
 
     def __post_init__(self) -> None:
         if not self.values:
-            raise ValueError("DiscreteAxis needs at least one value")
+            raise ValueError(
+                f"DiscreteAxis {self.name!r} needs at least one value, got an "
+                f"empty sequence. Pass the admissible labels, e.g. "
+                f"DiscreteAxis({self.name!r}, values=[0, 1])."
+            )
         if self.order is not None:
             self._rank = {v: i for i, v in enumerate(self.order)}
 
@@ -226,10 +237,19 @@ class VectorStateGrid:
 
     def __init__(self, axes: Sequence[Axis]):
         if not axes:
-            raise ValueError("VectorStateGrid needs at least one axis")
+            raise ValueError(
+                "VectorStateGrid needs at least one axis, got an empty "
+                "sequence. Pass one or more Axis objects, e.g. "
+                "VectorStateGrid([ContinuousAxis('charge', 0.0, 1.0, 5)])."
+            )
         names = [ax.name for ax in axes]
         if len(set(names)) != len(names):
-            raise ValueError("axis names must be unique")
+            dupes = sorted({n for n in names if names.count(n) > 1})
+            raise ValueError(
+                f"VectorStateGrid axis names must be unique, but {dupes} "
+                f"appear more than once in {names}. Give each axis a distinct "
+                f"name."
+            )
         self.axes: List[Axis] = list(axes)
         self.axis_by_name: Dict[str, Axis] = {ax.name: ax for ax in axes}
 
