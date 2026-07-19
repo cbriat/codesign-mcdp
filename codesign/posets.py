@@ -24,7 +24,7 @@ modelling need:
   recursively named) posets into a typed dict-like schema. Every design
   problem's F and R is a :class:`Ports`.
 - :class:`Discrete` is a finite poset over an explicit element list with
-  user-supplied ordering, useful for catalogue choice or enumerated states.
+  user-supplied ordering, useful for catalog choice or enumerated states.
 
 A backward-compatible alias ``NamedProduct = Ports`` is exported from the
 package; existing code using ``NamedProduct`` continues to work unchanged.

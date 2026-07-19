@@ -40,7 +40,7 @@ must be bucketed for tabular DP. The grid is explicit in the API so the
 discretisation is never hidden from the caller.
 
 The structure mirrors :mod:`codesign.temporal`: an :class:`Architecture`
-there and here play the same role, a :class:`Stage` is the dynamic analogue
+there and here plays the same role, a :class:`Stage` is the dynamic analogue
 of an ``Epoch``, and :func:`solve_dynamic` is the backward-DP analogue of
 that module's forward Viterbi pass.
 """

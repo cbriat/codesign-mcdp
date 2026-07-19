@@ -172,7 +172,7 @@ class System:
 
         - a string of the form ``"module.f_port"`` or an outer R name, or
         - a :class:`~codesign.sugar.Port` (typically obtained from a
-          :class:`ModuleHandle` or from :meth:`provides` / :meth:`requires`).
+          :class:`~codesign.sugar.ModuleHandle` or from :meth:`provides` / :meth:`requires`).
 
         ``demand`` may be:
 

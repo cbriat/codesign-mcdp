@@ -73,7 +73,7 @@ class Architecture:
         A design problem accepted by :func:`~codesign.solver.solve`
         (typically a built :class:`~codesign.system.System`). It may be
         shared across epochs or be epoch-specific; see
-        :class:`Epoch.candidates`.
+        :attr:`Epoch.candidates`.
     tags : mapping, optional
         Free-form metadata (for example the substrate an organism
         consumes, or the drivetrain mode). Not interpreted here; carried

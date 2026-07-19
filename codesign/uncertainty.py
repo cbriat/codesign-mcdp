@@ -5,7 +5,7 @@ Two regimes are supported.
 
 **Set-based, deterministic.** Each uncertain parameter (or correlated bundle
 of parameters) lives in a known set: a :class:`Box` (axis-aligned interval
-product), a :class:`Disk` or :class:`Circle` (2-D conveniences), or an
+product), a :func:`Disk` or :func:`Circle` (2-D conveniences), or an
 :class:`Ellipsoid` (n-D). The worst-case antichain over the set is computed
 analytically when "direction of badness" is declared, by boundary sampling
 otherwise.
@@ -625,7 +625,7 @@ def solve_with_uncertainty(
 ):
     """Run an uncertainty-aware solve and return an :class:`UncertaintyResult`.
 
-    See :func:`codesign.solver.solve` for parameter docs.
+    See :func:`~codesign.solver.solve` for parameter docs.
     """
     from .solver import solve  # avoid circular import
 
