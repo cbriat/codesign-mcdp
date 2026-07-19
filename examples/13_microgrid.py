@@ -336,7 +336,8 @@ def main():
 
     ax = viz.plot_uncertainty(res, "total_cost_usd",
                               nominal=nominal_cost,
-                              title="MC distribution of total cost (LFP)")
+                              title="MC distribution of total cost (LFP)",
+                              xlabel="total cost (USD)")
     plt.tight_layout()
     unc_path = os.path.join(out_dir, "microgrid_uncertainty.png")
     plt.savefig(unc_path, dpi=110)
