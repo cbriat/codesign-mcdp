@@ -41,16 +41,13 @@ robot changes morphology to suit terrain and must manage module wear and
 energy across a mission, and it mirrors the F1 paper's structured
 multi-component state (there: two batteries; here: two drive modules).
 
-Run directly to solve the vector-state DP and print the mission's Pareto
-front of (energy, ops) totals plus the monotonicity report.
+Run:  python -m examples.21_reconfigurable_robot
+Expected output: the morphology table and state-grid size, the mission
+Pareto front of (energy, ops) totals (5 incomparable points), and a vector
+monotonicity report over the product order.
 """
 
 from __future__ import annotations
-
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     AlgebraicDP,

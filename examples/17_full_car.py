@@ -77,6 +77,13 @@ References
 [5] BNEF, "Lithium-ion battery price survey", 2024 ($115/kWh pack).
 [6] EPA, "Fuel Economy Guide", 2024 model year data.
 [7] SAE J1349 for engine power rating conventions.
+
+Run:  python -m examples.17_full_car
+Expected output: none. This module defines the full-car subsystem catalogs,
+parametric modules, architecture table, and physics helpers so they can be
+imported; it does not yet assemble and solve a System, so importing or
+running it produces no console output. See 17_car_codesign.py for a
+complete, runnable vehicle co-design over the same problem.
 """
 from __future__ import annotations
 

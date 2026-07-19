@@ -38,17 +38,13 @@ Three incomparable modes per leg, spanning the cost/CO2 trade:
     balanced: middle cost and CO2
     rapid  : low cost, high CO2, higher energy draw
 
-Run directly to print the whole-mission Pareto front of (cost, CO2)
-totals and the per-leg mode schedule realising each Pareto point, then a
-monotonicity report confirming the value is well-behaved.
+Run:  python -m examples.20_sequential_codesign
+Expected output: the per-leg mode table, the whole-mission Pareto front of
+(cost, CO2) totals (9 incomparable points), and a monotonicity report
+confirming the value front is well-behaved in the carried budget.
 """
 
 from __future__ import annotations
-
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     AlgebraicDP,

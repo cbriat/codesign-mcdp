@@ -79,15 +79,18 @@ All numerical values are illustrative, drawn from the published
 ranges in the references above. They are *not* claimed to reflect
 any specific OEM product; they are calibrated to roughly match
 fleet averages for each technology class.
+
+Run:  python -m examples.17_car_codesign
+Expected output: for each of four missions (Urban Compact, Family Daily,
+Suburban Utility, Performance), the feasible-count and cheapest-feasible
+cost / weight / fuel-or-energy / CO2 per architecture (ICE / HEV / EV),
+followed by a summary table with 10-year total cost of ownership. Takes
+around 7 s to run.
 """
 from __future__ import annotations
 
 import math
-import os
-import sys
 from typing import Dict, List, Optional, Tuple
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     AlgebraicDP,

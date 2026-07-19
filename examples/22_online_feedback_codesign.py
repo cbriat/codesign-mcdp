@@ -35,17 +35,14 @@ solar input (day/night cycle changes recharge). The loop adapts the
 configuration online to both, and the audit log records every decision,
 condition, and outcome, which is the artefact a field operator wants.
 
-Run directly to simulate a multi-step deployment and print the closed-loop
-schedule and audit trail, showing the node escalating to high_rate during
-the storm and falling back when charge runs low at night.
+Run:  python -m examples.22_online_feedback_codesign
+Expected output: the closed-loop audit trail over 12 steps, the resulting
+configuration schedule, and the total ops cost; the node escalates to
+high_rate during the storm (steps 4-7) and falls back to cheaper configs
+as charge runs low at night.
 """
 
 from __future__ import annotations
-
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from codesign import (
     AlgebraicDP,
