@@ -440,18 +440,34 @@ def _to_dot_recurse(dp, lines: List[str], counter: List[int],
         return cluster_id
 
     # Composition operators: introspect by class name.
+    # Series/Parallel store their two children as ``dp1``/``dp2`` (see
+    # codesign.composition); older code read ``left``/``right``, which do
+    # not exist and raised AttributeError. Fall back to left/right just in
+    # case a future variant uses those names.
     cls = type(dp).__name__
     if cls == "Series":
-        n_left = _to_dot_recurse(dp.left, lines, counter, parent=None, edge_label=None)
-        n_right = _to_dot_recurse(dp.right, lines, counter, parent=None, edge_label=None)
+        left = getattr(dp, "dp1", None)
+        if left is None:
+            left = getattr(dp, "left", None)
+        right = getattr(dp, "dp2", None)
+        if right is None:
+            right = getattr(dp, "right", None)
+        n_left = _to_dot_recurse(left, lines, counter, parent=None, edge_label=None)
+        n_right = _to_dot_recurse(right, lines, counter, parent=None, edge_label=None)
         lines.append(f'  {n_left} -> {n_right} [label="series"];')
         if parent is not None:
             suffix = f' [label="{edge_label}"]' if edge_label else ""
             lines.append(f"  {parent} -> {n_left}{suffix};")
         return n_left
     if cls == "Parallel":
-        n_left = _to_dot_recurse(dp.left, lines, counter, parent=None, edge_label=None)
-        n_right = _to_dot_recurse(dp.right, lines, counter, parent=None, edge_label=None)
+        left = getattr(dp, "dp1", None)
+        if left is None:
+            left = getattr(dp, "left", None)
+        right = getattr(dp, "dp2", None)
+        if right is None:
+            right = getattr(dp, "right", None)
+        n_left = _to_dot_recurse(left, lines, counter, parent=None, edge_label=None)
+        n_right = _to_dot_recurse(right, lines, counter, parent=None, edge_label=None)
         # No edge between them, but bracket them with a synthetic node:
         bracket = _node_id("par", counter)
         lines.append(f'  {bracket} [label="parallel", shape=plaintext];')
