@@ -8,7 +8,10 @@ many discrete candidates (catalog entries, robot types, component
 families), evaluating every one is wasteful. Instead, maintain
 history-dependent bounds on the inner-solve output for each candidate,
 and only evaluate the candidate that the bounds say is "most promising"
-under an upper-confidence rule. Candidates whose lower bound on the
+under the ``lcb`` (lower-confidence-bound) rule by default -- for
+minimisation the most optimistic candidate is the one with the smallest
+lower bound; ``ucb`` and ``random`` pickers are also available.
+Candidates whose lower bound on the
 antichain output is already dominated by the incumbent are eliminated
 without ever being evaluated.
 
@@ -786,8 +789,10 @@ class OnlineResult:
     n_candidates : int
         Total candidates considered at start.
     history : list[dict]
-        Per-iteration log: ``{'pick', 'antichain', 'eliminated_now',
-        'remaining'}``. The order in which candidates were chosen and the
+        Per-iteration log: ``{'pick', 'antichain', 'remaining', 'evaluated',
+        'eliminated', 'phase'}``, where ``remaining``/``evaluated``/
+        ``eliminated`` are running counts and ``phase`` is e.g.
+        ``'warm_start'``. The order in which candidates were chosen and the
         elimination cascade are reconstructible from this.
     evaluated_ids : list[int]
         Indices (into the original candidates list) actually evaluated.

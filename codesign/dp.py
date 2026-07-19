@@ -178,6 +178,31 @@ class CatalogDP(DesignProblem):
                         name=entry.get("name", ""),
                     )
                 )
+        if not self.catalog:
+            raise ValueError(
+                f"CatalogDP {name!r} was built with an empty catalogue; it "
+                f"must contain at least one CatalogEntry (each entry pairs a "
+                f"'provides' functionality vector with a 'costs' resource "
+                f"vector). Pass a non-empty catalog=[CatalogEntry(...), ...]."
+            )
+        # Reject duplicate (non-empty) entry names: results are traced back to
+        # a single implementation by name, so a clash makes that ambiguous.
+        # Unnamed entries (the default name="") are left alone.
+        seen: set = set()
+        dupes: List[str] = []
+        for entry in self.catalog:
+            if entry.name:
+                if entry.name in seen and entry.name not in dupes:
+                    dupes.append(entry.name)
+                seen.add(entry.name)
+        if dupes:
+            raise ValueError(
+                f"CatalogDP {name!r} has duplicate catalog entry name(s) "
+                f"{sorted(dupes)}; entry names must be unique so a solved "
+                f"point can be traced to a single implementation. Rename or "
+                f"remove the duplicate entr"
+                f"{'ies' if len(dupes) > 1 else 'y'}."
+            )
 
     def h(self, f) -> Antichain:
         feasible_costs = []

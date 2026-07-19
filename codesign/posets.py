@@ -169,6 +169,12 @@ class Naturals(Poset):
     unit: str = ""
     name: str = field(default="N+")
 
+    def __post_init__(self):
+        # Mirror Reals: if a unit was given but the default name kept, fold
+        # the unit into the name so debug prints stay informative.
+        if self.unit and self.name == "N+":
+            self.name = f"N+[{self.unit}]"
+
     def leq(self, a, b) -> bool:
         # Handle the top (+inf) carefully: top is greater than every finite
         # natural, and only equal to itself.
@@ -191,6 +197,14 @@ class Naturals(Poset):
         if a == math.inf or b == math.inf:
             return math.inf
         return max(int(a), int(b))
+
+    def format(self, x) -> str:
+        # Mirror Reals.format, but honour the integer nature of naturals so
+        # a value like 3.0 prints "3" rather than "3.0", and append the unit
+        # (previously ``unit=`` was accepted but silently ignored here).
+        if math.isinf(x):
+            return "⊤"
+        return f"{int(x)}{(' ' + self.unit) if self.unit else ''}"
 
 
 # ===========================================================================

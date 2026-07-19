@@ -522,20 +522,19 @@ def _extract_module_refs(expr) -> List[str]:
             if mod and mod not in names:
                 names.append(mod)
             return
-        # BinOp children: .left and .right
-        left = getattr(e, "left", None)
-        right = getattr(e, "right", None)
-        if left is not None or right is not None:
-            if left is not None:
-                walk(left)
-            if right is not None:
-                walk(right)
+        # Walk children. Handles _BinOp (left/right), Neg (inner), and
+        # Func (inner) -- the last two were previously missed, so a module
+        # referenced only inside a sqrt()/exp()/negation was silently
+        # dropped from the graph. Mirrors diagram._collect_port_refs.
+        walked = False
+        for attr in ("left", "right", "inner", "arg"):
+            child = getattr(e, attr, None)
+            if child is not None:
+                walk(child)
+                walked = True
+        if walked:
             return
-        # UnaryOp / function: .arg or .args
-        arg = getattr(e, "arg", None)
-        if arg is not None:
-            walk(arg)
-            return
+        # Variadic nodes: .args or .children.
         args = getattr(e, "args", None) or getattr(e, "children", None)
         if args:
             for c in args:

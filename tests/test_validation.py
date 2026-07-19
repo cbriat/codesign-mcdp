@@ -568,6 +568,147 @@ def test_plot_antichain_bad_axes_count():
         viz.plot_antichain(res, ["mass"])
 
 
+# ---------------------------------------------------------------------------
+# Fix: CatalogDP construction guards (empty catalogue, duplicate entry names)
+# ---------------------------------------------------------------------------
+
+
+def _catalog_ports():
+    return Ports({"speed": Reals()}), Ports({"cost": Reals()})
+
+
+def test_catalogdp_empty_catalogue_rejected():
+    """An empty catalogue must fail at construction, naming the DP."""
+    from codesign import CatalogEntry  # noqa: F401
+    F, R = _catalog_ports()
+    with pytest.raises(ValueError) as excinfo:
+        CatalogDP(F=F, R=R, catalog=[], name="engine_catalog")
+    msg = str(excinfo.value)
+    assert "engine_catalog" in msg, msg
+    assert "at least one CatalogEntry" in msg, msg
+
+
+def test_catalogdp_duplicate_names_rejected():
+    """Two entries with the same name must be rejected, naming the clash."""
+    from codesign import CatalogEntry
+    F, R = _catalog_ports()
+    entries = [
+        CatalogEntry(provides={"speed": 1.0}, costs={"cost": 1.0}, name="A"),
+        CatalogEntry(provides={"speed": 2.0}, costs={"cost": 2.0}, name="A"),
+    ]
+    with pytest.raises(ValueError) as excinfo:
+        CatalogDP(F=F, R=R, catalog=entries, name="engine_catalog")
+    msg = str(excinfo.value)
+    assert "engine_catalog" in msg, msg
+    assert "'A'" in msg and "duplicate" in msg, msg
+
+
+def test_catalogdp_unnamed_entries_allowed():
+    """Multiple unnamed (default name="") entries stay legitimate."""
+    from codesign import CatalogEntry
+    F, R = _catalog_ports()
+    entries = [
+        CatalogEntry(provides={"speed": 1.0}, costs={"cost": 1.0}),
+        CatalogEntry(provides={"speed": 2.0}, costs={"cost": 2.0}),
+    ]
+    dp = CatalogDP(F=F, R=R, catalog=entries, name="engine_catalog")
+    assert len(dp.catalog) == 2
+
+
+# ---------------------------------------------------------------------------
+# Fix: detect_resets aligns with the sibling "no candidates" ValueError
+# ---------------------------------------------------------------------------
+
+
+def test_detect_resets_no_candidates_rejected():
+    """A stage with no candidates and no default architectures must raise,
+    like solve_sequential / check_monotonicity, not vacuously reset."""
+    from codesign import SeqStage, detect_resets
+    stage = SeqStage(
+        "s0",
+        functionality=lambda x: {"demand": 1.0},
+        transition=lambda s, p: 0.0,
+    )
+    grid = StateGrid.linspace(0.0, 4.0, 5)
+    with pytest.raises(ValueError) as excinfo:
+        detect_resets([stage], grid, cost_axes=["cost"])
+    msg = str(excinfo.value)
+    assert "'s0'" in msg, msg
+    assert "no candidates" in msg, msg
+
+
+# ---------------------------------------------------------------------------
+# Fix: Naturals honours unit= in format() (previously silently ignored)
+# ---------------------------------------------------------------------------
+
+
+def test_naturals_unit_formatting():
+    """Naturals(unit=...) prints the unit and folds it into the name,
+    mirroring Reals; the default no-unit form is unchanged."""
+    from codesign import Naturals
+    import math
+    n = Naturals(unit="parts")
+    assert n.name == "N+[parts]"
+    assert n.format(3) == "3 parts"
+    assert n.format(3.0) == "3 parts"     # integer nature preserved
+    assert n.format(math.inf) == "⊤"
+    plain = Naturals()
+    assert plain.name == "N+"
+    assert plain.format(0) == "0"
+    assert plain.format(25) == "25"
+
+
+# ---------------------------------------------------------------------------
+# Fix: to_dot walks .inner so Func/Neg-wrapped module refs keep their edge
+# ---------------------------------------------------------------------------
+
+
+def _inner_edge_system(rhs_builder):
+    """Build a System whose battery.capacity constraint wraps actuator.power
+    in a Func/Neg node, returning the dot source of the built DP."""
+    from codesign import Module, System, viz
+    from codesign.posets import Reals as _R
+
+    class Act(Module):
+        F = {"lift": _R()}
+        R = {"power": _R()}
+        def h(self, f):
+            return {"power": f["lift"]}
+
+    class Bat(Module):
+        F = {"capacity": _R()}
+        R = {"mass": _R()}
+        def h(self, f):
+            return {"mass": f["capacity"]}
+
+    s = System("t")
+    demand = s.provides("demand", unit="N")
+    total_m = s.requires("total_mass", unit="kg")
+    b = s.add("battery", Bat())
+    a = s.add("actuator", Act())
+    a.lift >= demand
+    b.capacity >= rhs_builder(a)
+    total_m >= b.mass
+    dp = s.build()
+    return viz.to_dot(dp)
+
+
+def test_to_dot_inner_edge_sqrt():
+    """A sqrt()-wrapped (Func) operand must still emit the module edge."""
+    from codesign.sugar import sqrt
+    dot = _inner_edge_system(lambda a: sqrt(a.power))
+    # A constraint edge (color="#555") carrying the sqrt label must appear.
+    assert 'color="#555"' in dot, dot
+    assert 'label="sqrt(actuator.power)"' in dot, dot
+
+
+def test_to_dot_inner_edge_neg():
+    """A Neg-wrapped operand must still emit the module edge."""
+    dot = _inner_edge_system(lambda a: -a.power)
+    assert 'color="#555"' in dot, dot
+    assert 'label="-actuator.power"' in dot, dot
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
