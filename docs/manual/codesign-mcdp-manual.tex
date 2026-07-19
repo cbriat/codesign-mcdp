@@ -1258,8 +1258,9 @@ strategy is wasteful. The \texttt{codesign.online} module implements
 the compositional online learner of Alharbi, Dahleh \& Zardini
 (\texttt{arXiv:2604.22624}): maintain history-dependent bounds on
 each candidate's inner-solve output, evaluate the most promising one
-under an upper-confidence rule, then prune any candidate whose lower
-bound is already dominated by the incumbent.
+under the \texttt{lcb} (lower-confidence-bound) rule by default, then
+prune any candidate whose lower bound is already dominated by the
+incumbent.
 
 \subsection{Optimistic evaluators}
 
@@ -1366,8 +1367,8 @@ Algorithm (a simplified Algorithm~2 from Alharbi et al.):
 \item Bound every remaining candidate via the evaluator.
 \item Eliminate every candidate whose lower bound is already
   dominated by the current incumbent antichain.
-\item Pick the most promising survivor by UCB on its lower-bound
-  sum.
+\item Pick the most promising survivor with the configured picker
+  (\texttt{lcb} by default) on its lower-bound sum.
 \item Run the inner solve at that candidate; observe the result in
   the evaluator; merge into the incumbent via \texttt{union\_min}.
 \item Repeat until the candidates are exhausted or the budget is hit.
@@ -2030,16 +2031,21 @@ print(N.leq(3, N.top()))   # True
 print(N.join(2, 5))        # 5
 print(N.is_top(N.top()))   # True
 print(N.bottom())          # 0
+print(N.format(3))         # 3 parts
+print(N.format(N.top()))   # ⊤
 \end{lstlisting}
 
-Parameters: \texttt{unit} and \texttt{name} as for \texttt{Reals}. Note
-that \texttt{Naturals} does not override \texttt{format}, so unlike
-\texttt{Reals} the \texttt{unit} is not shown when an element is printed.
+Parameters: \texttt{unit} and \texttt{name} as for \texttt{Reals}.
+\texttt{format} mirrors \texttt{Reals}: it appends the \texttt{unit} (so
+\texttt{N.format(3)} prints \texttt{3 parts}) and renders the top as
+$\top$; finite values keep their integer form (\texttt{3.0} prints as
+\texttt{3}). When \texttt{unit} is set and the default \texttt{name} is
+kept, the name is decorated as \texttt{N+[unit]}.
 
 Deviations from the \texttt{Poset} contract: overrides \texttt{leq} to
 treat $+\infty$ as strictly above every finite natural (and equal only to
-itself), \texttt{is\_top} and \texttt{join}. Finite inputs are coerced
-with \texttt{int()}.
+itself), \texttt{is\_top}, \texttt{join}, and \texttt{format}. Finite
+inputs are coerced with \texttt{int()}.
 
 Errors: none raised directly.
 
@@ -2379,7 +2385,10 @@ print(cat.h({"speed": 6.0}))  # only B works: (cost=25)
         keys.
 \end{itemize}
 Errors: raises \texttt{TypeError} if \texttt{F} or \texttt{R} is not a
-\texttt{Ports}.
+\texttt{Ports}; \texttt{ValueError} (naming the DP) if the catalogue is
+empty, or if two entries share the same non-empty \texttt{name} (the
+clashing name(s) are listed). Multiple entries left unnamed (the default
+\texttt{name=""}) are allowed.
 
 \paragraph{\texttt{ConstraintDP}}
 \label{ref:dp:constraintdp}
@@ -3423,6 +3432,13 @@ Parameters: \texttt{dp} the design problem to describe; \texttt{name} the
 graph id --- used bare when it is a valid GraphViz identifier, otherwise
 double-quoted with embedded quotes and backslashes escaped.
 
+Constraint edges track the modules referenced on the right-hand side even
+when a module port is wrapped in a function or negation --- the reference
+walker descends through \texttt{.inner} (\texttt{sqrt(...)}, \texttt{exp},
+a leading minus) as well as \texttt{.left}/\texttt{.right}/\texttt{.arg},
+so a constraint like \texttt{bat.capacity >= sqrt(act.power)} still draws
+the \texttt{act}$\rightarrow$\texttt{bat} edge.
+
 Errors: none raised directly; the walker swallows introspection failures
 and returns a best-effort graph.
 
@@ -3924,7 +3940,7 @@ Field & Type & Meaning \\
 \texttt{n\_evaluated} & \texttt{int} & inner solves run \\
 \texttt{n\_eliminated} & \texttt{int} & candidates pruned by bounds \\
 \texttt{n\_candidates} & \texttt{int} & candidates at start \\
-\texttt{history} & \texttt{list[dict]} & per-iteration log \\
+\texttt{history} & \texttt{list[dict]} & per-iteration log; each entry has keys \texttt{pick}, \texttt{antichain}, \texttt{remaining}, \texttt{evaluated}, \texttt{eliminated}, \texttt{phase} \\
 \texttt{evaluated\_ids} & \texttt{list[int]} & indices actually evaluated \\
 \texttt{eliminated\_ids} & \texttt{list[int]} & indices pruned \\
 \texttt{incumbent\_ids} & \texttt{list[int]} & indices in the final antichain \\
@@ -4600,7 +4616,8 @@ print(join_combine(a, b))          # -> {'cost': 5.0, 'co2': 8.0}
     over the same axes; returns a \texttt{dict} of their component-wise
     maximum.
 \end{itemize}
-Errors: none raised directly.
+Errors: none raised directly (a \texttt{KeyError} results if \texttt{b}
+lacks an axis present in \texttt{a}).
 
 \paragraph{\texttt{solve\_sequential}}\label{ref:sequential:solve_sequential}
 Solves the antichain-valued sequential co-design problem by the backward
@@ -4822,10 +4839,11 @@ print(detect_resets([run, reset, run],
     \texttt{architectures}, \texttt{max\_iter}, \texttt{solve\_kwargs} ---
     as \texttt{solve\_sequential} (\ref{ref:sequential:solve_sequential}).
 \end{itemize}
-Errors: none raised directly. Unlike \texttt{solve\_sequential}, a missing
-default architecture set is \emph{not} an error here: a stage without
-candidates falls back to an empty candidate list, so it is (vacuously) a
-reset.
+Errors: raises \texttt{ValueError} (naming the stage) when a stage has no
+\texttt{candidates} and no default \texttt{architectures} was supplied ---
+the same guard as \texttt{solve\_sequential} and \texttt{check\_monotonicity},
+so an under-specified stage fails loudly instead of being silently (and
+vacuously) reported as a reset.
 
 \paragraph{\texttt{factorise\_at\_resets}}\label{ref:sequential:factorise_at_resets}
 Partitions the horizon into maximal quiescence-free runs given the reset

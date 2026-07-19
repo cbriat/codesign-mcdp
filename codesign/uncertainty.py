@@ -81,17 +81,6 @@ def _import_numpy_or_die():
         ) from e
 
 
-def _import_scipy_stats_or_die():  # pragma: no cover
-    try:
-        from scipy import stats
-        return stats
-    except ImportError as e:
-        raise ImportError(
-            "The stochastic uncertainty layer requires scipy. "
-            "Install with `pip install scipy`."
-        ) from e
-
-
 # ===========================================================================
 # Set-based uncertainty
 # ===========================================================================

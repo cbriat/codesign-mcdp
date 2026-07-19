@@ -451,6 +451,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   observability and uncertainty options, to avoid call-site ambiguity.
 
 ### Fixed
+- **`viz.to_dot` dropped constraint edges through `sqrt`/negation**
+  (`codesign/viz.py`). The `_extract_module_refs` walker descended
+  `.left`/`.right`/`.arg`/`.args` but never `.inner`, so a constraint whose
+  right-hand side wrapped a module port in a `Func` (`sqrt`, `exp`, `log`) or
+  `Neg` (a leading minus) — e.g. `bat.capacity >= sqrt(act.power)` — silently
+  lost its module-to-module edge in the emitted dot, even though
+  `diagram._collect_port_refs` handled `.inner` correctly. The walker now
+  descends `.inner` too. New tests `test_to_dot_inner_edge_sqrt` and
+  `test_to_dot_inner_edge_neg` assert the edge appears in the dot source.
+- **`Naturals` ignored its `unit=`** (`codesign/posets.py`). `Naturals`
+  accepted a `unit` argument but, unlike `Reals`, never overrode `format`, so
+  the unit was silently dropped and the top element printed as `inf`.
+  `Naturals.format` now mirrors `Reals`: it appends the unit (`format(3)` ->
+  `"3 parts"`), renders the top as `⊤`, and keeps values integral
+  (`3.0` -> `"3"`); a set unit also decorates the default name as `N+[unit]`.
+  The default no-unit form of every existing consumer is unchanged.
+- **`CatalogDP` now validates its catalogue at construction**
+  (`codesign/dp.py`). An empty catalogue raises `ValueError` (naming the DP
+  and requiring at least one `CatalogEntry`), and two entries sharing the same
+  non-empty `name` raise `ValueError` listing the clashing name(s), so a solved
+  point always traces back to a single implementation. Multiple unnamed
+  (default `name=""`) entries remain allowed.
+- **`detect_resets` no longer vacuously flags an under-specified stage**
+  (`codesign/sequential.py`). A stage with no `candidates` and no default
+  `architectures` used to fall back to an empty candidate list, making it
+  (falsely) look like a reset, while the sibling `solve_sequential` /
+  `check_monotonicity` raised. `detect_resets` now raises the same
+  stage-naming `ValueError`.
+- **Documentation/comment corrections** (`codesign/online.py`,
+  `codesign/sequential.py`, `codesign/uncertainty.py`). `OnlineResult.history`
+  docstring now lists the actual per-entry keys
+  (`pick`/`antichain`/`remaining`/`evaluated`/`eliminated`/`phase`); the
+  online module docstring and the manual now describe the default picker as
+  the `lcb` (lower-confidence-bound) rule rather than "upper-confidence";
+  `sum_combine`/`join_combine` docstrings note they `KeyError` on operands
+  with mismatched axes; and the dead, unused `_import_scipy_stats_or_die`
+  helper was removed.
 - **Correctness fix in the antichain-valued backward pass** (`sequential.py`
   and `vector_dp.py`). The pass previously iterated the cost-Pareto-reduced
   stage antichain before applying the carried-state transition, which could

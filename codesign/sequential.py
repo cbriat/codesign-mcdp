@@ -107,6 +107,10 @@ def sum_combine(a: Mapping, b: Mapping) -> Dict:
     across stages (fuel burned, money spent, wear incurred); the reachable
     frontier can grow polynomially with the horizon (Q2, fixed-dimension
     regime).
+
+    Both operands must share the same axes: the result is keyed by ``a``,
+    so any axis present in ``a`` but missing from ``b`` raises ``KeyError``
+    (and an axis only in ``b`` is silently dropped).
     """
     return {k: a[k] + b[k] for k in a}
 
@@ -119,6 +123,10 @@ def join_combine(a: Mapping, b: Mapping) -> Dict:
     frontier stays bounded uniformly in the horizon (Q2, renewable
     regime), and if every stage resets the whole problem collapses to a
     static co-design.
+
+    Both operands must share the same axes: the result is keyed by ``a``,
+    so any axis present in ``a`` but missing from ``b`` raises ``KeyError``
+    (and an axis only in ``b`` is silently dropped).
     """
     return {k: max(a[k], b[k]) for k in a}
 
@@ -655,7 +663,14 @@ def detect_resets(
     def candidates_for(st: SeqStage) -> Sequence[Architecture]:
         if st.candidates is not None:
             return st.candidates
-        return architectures or []
+        if architectures is None:
+            raise ValueError(
+                f"stage {st.name!r} has no candidates and no default "
+                f"architecture set was supplied. Either set candidates=[...] "
+                f"on the stage, or pass architectures=[...] to the sequential "
+                f"solver (solve_sequential / check_monotonicity)."
+            )
+        return architectures
 
     for m, st in enumerate(stages):
         is_reset = True
