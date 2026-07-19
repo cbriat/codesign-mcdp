@@ -99,10 +99,12 @@ problem asks for the antichain of minimal resources needed to deliver it.
 Design problems compose under three operators (series, parallel,
 feedback), and the resulting class is closed under composition. The
 library implements the antichain calculus, six primitive design-problem
-types, the three composition operators, a Kleene fixed-point solver, two
-high-level builders (an MCDPL-style declarative builder and a modular
-\texttt{System} builder), and a collection of worked examples. This
-document is the reference manual for version 0.1.0.
+types, the three composition operators, a Kleene fixed-point solver, and
+two high-level builders (an MCDPL-style declarative builder and a modular
+\texttt{System} builder). Further layers add set-based and stochastic
+uncertainty, compositional online learning, and temporal, vector-state,
+and online co-design, alongside a suite of worked examples. This document
+is the reference manual for version 0.1.0.
 \end{abstract}
 
 \tableofcontents
@@ -131,21 +133,30 @@ domain-specific language.
 \codename{} is a from-scratch Python implementation of the algorithmic
 core, designed around composable Python objects rather than a separate
 DSL. It targets users who want to formulate and solve MCDPs from inside
-their existing Python codebase without context switches to a DSL or
-external solver. The library is small (about 2000 lines of Python), has
-no required runtime dependencies beyond the standard library, and is
-licensed under MIT.
+their existing Python codebase, without context switching to a DSL or an
+external solver. The algorithmic core (posets, antichains, primitive
+design problems, composition, solver, and both builders) has no required
+runtime dependencies beyond the standard library; the uncertainty,
+online-learning, and visualisation layers pull in \texttt{numpy},
+\texttt{scipy}, and \texttt{matplotlib} as optional extras. The whole
+package is roughly 8000 lines of Python and is licensed under MIT.
 
 \paragraph{Scope of this document.} This manual covers the public API
 and the mathematical structure it implements. Section~\ref{sec:theory}
 recalls the formal background. Sections~\ref{sec:posets} through
-\ref{sec:solver} describe the data types, primitive DPs, composition
-operators, and the solver in detail. Sections~\ref{sec:mcdp-builder}
-and~\ref{sec:system-builder} document the two high-level builders.
-Section~\ref{sec:examples} walks through every example shipped with the
-library. Section~\ref{sec:guidelines} collects modelling guidelines and
-common pitfalls. Section~\ref{sec:limitations} discusses limitations
-and future directions.
+\ref{sec:solver} describe the data types, primitive design problems,
+composition operators, and the solver in detail. Section~\ref{sec:uncertainty}
+covers set-based and stochastic uncertainty, and
+Section~\ref{sec:online-learning} the online-learning layer;
+Section~\ref{sec:visualisation} documents the visualisation helpers.
+Sections~\ref{sec:mcdp-builder} and~\ref{sec:system-builder} document the
+two high-level builders. Section~\ref{sec:examples} walks through every
+example shipped with the library. Section~\ref{sec:temporal} introduces
+the temporal, vector-state, and online co-design layers, and
+Section~\ref{sec:domains} surveys realistic problem domains for them.
+Section~\ref{sec:guidelines} collects modelling guidelines and common
+pitfalls, and Section~\ref{sec:limitations} discusses limitations and
+future directions.
 
 \paragraph{Conventions.} Code listings are typeset in monospaced font.
 Type signatures use Python's standard notation
@@ -309,22 +320,30 @@ conditions holds: $A_{k+1} = A_k$ (fixed point), $A_{k+1} = \emptyset$
 \label{sec:install}
 % ===========================================================================
 
-\codename{} requires Python 3.9 or newer. The package has no
-required runtime dependencies; \texttt{matplotlib} is needed only for
-example~05.
+\codename{} requires Python 3.9 or newer. The algorithmic core has no
+required runtime dependencies; the optional layers listed below pull in
+\texttt{numpy}, \texttt{scipy}, \texttt{matplotlib}, or \texttt{graphviz}
+as needed.
 
 \paragraph{Installation.} Clone the repository and install in editable
 mode:
 \begin{lstlisting}[language=bash]
-git clone https://github.com/cbriat/codesign-mcdp.git
+git clone https://github.com/corentinbriat/codesign-mcdp.git
 cd codesign-mcdp
 pip install -e .
 \end{lstlisting}
 
 \paragraph{Optional extras.}
 \begin{itemize}[leftmargin=2em]
-  \item \texttt{pip install -e ".[viz]"} adds matplotlib for the
-        visualisation example.
+  \item \texttt{pip install -e ".[viz]"} adds \texttt{matplotlib} for the
+        visualisation helpers (Section~\ref{sec:visualisation}) and the
+        plotting examples.
+  \item \texttt{pip install -e ".[online]"} adds \texttt{numpy} and
+        \texttt{scipy} for the uncertainty
+        (Section~\ref{sec:uncertainty}) and online-learning
+        (Section~\ref{sec:online-learning}) layers.
+  \item \texttt{pip install -e ".[diagram]"} adds \texttt{graphviz} for
+        the block-diagram renderer (Section~\ref{sec:block-diagrams}).
   \item \texttt{pip install -e ".[nb]"} adds the Jupyter tooling needed
         to (re)generate the notebooks.
 \end{itemize}
@@ -332,8 +351,8 @@ pip install -e .
 \paragraph{Repository layout.}
 \begin{verbatim}
 codesign-mcdp/
-  codesign/          the Python package (9 modules)
-  examples/          eight runnable example scripts
+  codesign/          the Python package (21 modules)
+  examples/          23 runnable example scripts
   notebooks/         the same examples as executed .ipynb notebooks
   tests/             smoke tests
   docs/              this manual plus rendered trace images
@@ -491,6 +510,10 @@ class-A topology (clean, hot) or a class-D topology (efficient, harsh).
 \texttt{h(f)} emits both points, so the engineer sees the real
 tradeoff:
 \begin{lstlisting}
+F = Ports({"watts":    Reals(unit="W")})
+R = Ports({"power_in": Reals(unit="W"),
+           "thd":      Reals()})
+
 def h_amp(f):
     watts = f["watts"]
     return Antichain.from_set(R, [
@@ -498,12 +521,7 @@ def h_amp(f):
         {"power_in": watts / 0.90, "thd": 0.020},   # class-D
     ])
 
-amp = FunctionDP(
-    F=Ports({"watts":    Reals(unit="W")}),
-    R=Ports({"power_in": Reals(unit="W"),
-                    "thd":      Reals()}),
-    h_fn=h_amp,
-)
+amp = FunctionDP(F, R, h_amp)
 \end{lstlisting}
 \end{example}
 
@@ -521,9 +539,9 @@ CatalogDP(
 )
 
 CatalogEntry(
-    name: str,
     provides: dict[str, Any],
     costs: dict[str, Any],
+    name: str = "",
 )
 \end{lstlisting}
 
@@ -569,15 +587,15 @@ ConstraintDP(
     R: Ports,
     sampler: Callable[[dict], Iterable[dict]],
     feasible: Callable[[dict, dict], bool],
-    cost: Callable[[dict, dict], dict],
+    cost: Callable[[dict], dict],
     name: str = "constraint",
 )
 \end{lstlisting}
 
-The \texttt{sampler} yields candidate resource dicts for the given
-functionality; \texttt{feasible} filters them; \texttt{cost} maps the
-feasible ones into the resource poset, and the result is reduced by
-$\Min$.
+The \texttt{sampler} yields candidate implementations for the given
+functionality; \texttt{feasible(impl, f)} filters them; \texttt{cost(impl)}
+maps each feasible implementation into the resource poset, and the result
+is reduced by $\Min$.
 
 \subsection{\texttt{ODE\_DP}}
 
@@ -596,39 +614,40 @@ steady-state value.
 ODE_DP(
     F: Ports,
     R: Ports,
-    rhs: Callable,
+    rhs: Callable[[state, float, dict], state],
     extract: Callable[[state], dict],
-    mode: str,            # "final_value" or "steady_state"
-    t_end: float = 1.0,
-    n_steps: int = 100,
-    x0_fn: Callable[[dict], Any] = ...,
+    mode: str = "final_value",   # or "steady_state"
+    t_end: float = 10.0,
+    n_steps: int = 200,
+    x0_fn: Callable[[dict], state] = None,   # default: lambda f: 0.0
     name: str = "ode",
 )
 \end{lstlisting}
 
 \begin{example}[A heater at thermal steady state]
-A wall heater whose steady-state input power is recovered from
-Newton's law of cooling, $\dot T = (P - k(T - T_\infty))/C$. The
-heater's resource is the electrical power required to hold the
-target temperature:
+A wall heater sized from Newton's law of cooling: to hold a temperature
+rise $\Delta T$ above ambient, the input power must balance the heat loss
+$k\,\Delta T$. Modelling the delivered power as a scalar state $x$ that
+relaxes towards its steady value, $\dot x = k\,\Delta T - x$, the root is
+$x = k\,\Delta T$. The heater's resource is that steady input power:
 \begin{lstlisting}
-def rhs(state, t, f):
-    T = state["T"]
-    k, T_inf, C = 0.5, 20.0, 1000.0
-    return {"T": (f["power_in"] - k * (T - T_inf)) / C}
+F = Ports({"delta_T": Reals(unit="K")})
+R = Ports({"power":   Reals(unit="W")})
+k = 0.5   # heat-loss coefficient, W/K
 
 heater = ODE_DP(
-    F=Ports({"target_T":  Reals(unit="C"),
-                    "power_in":  Reals(unit="W")}),
-    R=Ports({"steady_T":  Reals(unit="C")}),
-    rhs=rhs,
-    extract=lambda state: {"steady_T": state["T"]},
+    F, R,
+    rhs=lambda x, t, f: k * f["delta_T"] - x,
+    extract=lambda x: {"power": float(x)},
     mode="steady_state",
-    x0_fn=lambda f: {"T": 20.0},
+    x0_fn=lambda f: 0.0,
 )
+# solve(heater, {"delta_T": 30.0}) -> Antichain[(power=15 W)]
 \end{lstlisting}
-At steady state Newton iteration finds $T = T_\infty + P/k$, which
-is recovered exactly by the solver.
+The steady-state root $x = k\,\Delta T$ is recovered exactly by the
+Newton iteration. Note that the state carried by \texttt{ODE\_DP} is a
+plain scalar (or a list of scalars), not a dict: \texttt{rhs},
+\texttt{extract}, and \texttt{x0\_fn} all operate on that state directly.
 \end{example}
 
 \subsection{\texttt{UncertainDP}}
@@ -677,6 +696,14 @@ m_pess = solve(battery.with_mode("upper"), {"capacity": 3.6e6})
 \section{Composition Operators}
 \label{sec:composition}
 % ===========================================================================
+
+The three operators of Section~\ref{sec:theory} are exposed as classes
+(\texttt{Series}, \texttt{Parallel}, \texttt{Loop}) with lowercase
+function aliases (\texttt{series}, \texttt{par}, \texttt{loop}) matching
+the paper's notation. Each takes existing design problems and returns a
+new \texttt{DesignProblem}, so composites nest freely and are solved by
+the same \texttt{solve} entry point. Because the class of MCDPs is closed
+under all three, a composite is itself a monotone design problem.
 
 \subsection{Series}
 
@@ -776,8 +803,9 @@ drone = loop(inner, axis="battery_mass")
 # drone.F = {"payload"}, drone.R = {}
 # solve(drone, {"payload": 1.0}) iterates to the fixed point.
 \end{lstlisting}
-The closed-form solution is $m^\star = p / (1 - 0.5) = 2p$, which
-the Kleene iteration recovers in a handful of steps.
+The closed-form solution is $m^\star = p / (1 - 0.5) = 2p$, the fixed
+point to which the Kleene iteration converges (creeping to machine
+precision over several dozen contraction steps).
 \end{example}
 
 \begin{remark}[Multiple feedback loops]
@@ -793,27 +821,49 @@ usually more convenient.
 \label{sec:solver}
 % ===========================================================================
 
+All design problems, primitive or composite, are solved through a single
+entry point, \texttt{solve}. It evaluates the problem at a given
+functionality, running the Kleene fixed-point iteration of
+Theorem~\ref{thm:kleene} whenever a feedback loop is present, and returns
+a \texttt{SolveResult} carrying the resulting antichain together with
+convergence and feasibility metadata. This section documents that entry
+point, the underlying iteration, scalar minimisation over the returned
+front, and the solver's observability features.
+
 \subsection{Top-level entry point}
 
 \begin{lstlisting}
 solve(
     dp: DesignProblem,
-    functionality: dict | None,
-    *,
+    functionality: dict | None = None,
     max_iter: int = 200,
-    record_trace: bool = False,
+    *,
+    trace: bool = False,
+    verbose: int = 0,
+    on_iteration: Callable[[TraceEntry], None] | None = None,
+    start_from: SolveResult | Antichain | None = None,
+    uncertainty: list[str] | None = None,
+    n_samples: int = 1000,
+    rng_seed: int | None = None,
 ) -> SolveResult
 \end{lstlisting}
 
-The result is a dataclass with the following fields:
+The keyword-only arguments \texttt{trace}, \texttt{verbose},
+\texttt{on\_iteration}, and \texttt{start\_from} are described in
+Section~\ref{sec:solver-observability}; \texttt{uncertainty},
+\texttt{n\_samples}, and \texttt{rng\_seed} in
+Section~\ref{sec:uncertainty}. The result is a dataclass with the
+following fields:
 \begin{lstlisting}
 @dataclass
 class SolveResult:
     antichain: Antichain      # the Pareto front (in dp.R)
     iterations: int           # Kleene steps taken (0 if no loop)
-    converged: bool           # True if a fixed point was reached
+    status: str               # "converged", "max_iter", or "diverged"
     feasible: bool            # True if antichain has finite, nonempty points
-    trace: list[Antichain]    # the sequence A_0, A_1, ... if recorded
+    trace: list[TraceEntry]   # the per-step trace if trace=True, else None
+
+    # converged is a read-only alias for status == "converged"
 \end{lstlisting}
 
 \begin{example}[Inspecting a solve result]
@@ -842,11 +892,13 @@ print(best)                  # {"total_mass": 0.5602}
 \begin{lstlisting}
 kleene_loop(
     loop_dp: Loop,
-    f_outer: dict,
-    *,
+    f_outer: dict | None,
     max_iter: int = 200,
-    record_trace: bool = False,
-    trace_out: list | None = None,
+    *,
+    trace: bool = False,
+    verbose: int = 0,
+    on_iteration: Callable[[TraceEntry], None] | None = None,
+    start_from: Antichain | None = None,
     info_out: dict | None = None,
 ) -> Antichain
 \end{lstlisting}
@@ -1174,7 +1226,7 @@ bat.uncertain_dist = Stochastic(
 res = solve(drone, f,
             uncertainty=["mean", "p95", "cvar95", "samples"],
             n_samples=1000, rng_seed=42)
-# res.mean["total_mass"]    -> 0.5614 kg
+# res.mean["total_mass"]    -> 0.5613 kg
 # res.p95["total_mass"]     -> 0.5729 kg
 # res.cvar95["total_mass"]  -> 0.5742 kg
 # len(res.samples)          -> 1000
@@ -1186,7 +1238,7 @@ res = solve(drone, f,
 \label{sec:online-learning}
 % ===========================================================================
 
-When a co-design problem has many discrete candidates (catalogue
+When a co-design problem has many discrete candidates (catalog
 entries, robot types, component families) and each candidate's
 inner solve is non-trivial, the naive ``evaluate every entry''
 strategy is wasteful. The \texttt{codesign.online} module implements
@@ -1292,7 +1344,7 @@ The returned \texttt{OnlineResult} exposes:
 \end{description}
 
 \begin{example}[Fleet sizing across 200 robot types]
-A logistics service has a 200-entry catalogue of candidate robot
+A logistics service has a 200-entry catalog of candidate robot
 types, each described by four features. The Lipschitz evaluator
 caps how fast the inner-solve output can change with the features,
 so a single observation tightens the bound on every other candidate.
@@ -1400,7 +1452,7 @@ The \texttt{codesign.viz} module exposes four helpers built on
 \item[\texttt{plot\_uncertainty(unc\_result, port, nominal=None)}]
   Histogram of the Monte Carlo samples for the named R port, with
   the nominal, mean, p95, and CVaR95 marked as vertical lines.
-\item[\texttt{to\_dot(dp, name="dp")}] GraphViz dot string for the
+\item[\texttt{to\_dot(dp, name="codesign")}] GraphViz dot string for the
   system structure: modules as boxes, outer ports as labelled
   rectangles, constraint connections as edges. Render with
   \texttt{dot -Tpng} or paste into an online viewer.
@@ -1573,20 +1625,30 @@ with MCDP("drone") as m:
     m.provides("endurance",     unit="s")
     m.provides("extra_payload", unit="kg")
     m.provides("extra_power",   unit="W")
+    m.provides("battery_mass",  unit="kg")   # loop axis: in F and R
     m.requires("battery_mass",  unit="kg")
+    m.requires("report_mass",   unit="kg")   # mirror for visibility
 
-    m.constraint("battery_mass", lambda f:
-        (f["extra_power"] + 10.0 * (9.81 * (f["battery_mass"]
-                                            + f["extra_payload"])) ** 2)
-        * f["endurance"] / 1.8e6
-    )
+    def battery_mass_eq(f):
+        return (f["extra_power"]
+                + 10.0 * (9.81 * (f["battery_mass"]
+                                  + f["extra_payload"])) ** 2
+                ) * f["endurance"] / 1.8e6
+
+    m.constraint("battery_mass", battery_mass_eq)
+    m.constraint("report_mass",  battery_mass_eq)
     m.loop_on("battery_mass")
 
 drone = m.build()
 \end{lstlisting}
-Calling \texttt{solve(drone, \{"endurance": 300.0, ...\})} runs the
-same Kleene iteration the worked example~1 uses, returning the same
-\texttt{battery\_mass = 0.49 kg} fixed point.
+Calling \texttt{solve(drone, \{"endurance": 300.0, "extra\_payload":
+0.5, "extra\_power": 5.0\})} runs the same Kleene iteration as worked
+example~1 and returns the same \texttt{report\_mass = 0.049 kg} fixed
+point. The loop axis \texttt{battery\_mass} must be declared in both
+\texttt{provides} and \texttt{requires}, since that is the name
+\texttt{loop\_on} closes; the extra \texttt{report\_mass} resource
+mirrors it into the outer $R$ so the converged value stays visible in
+the result, following the guideline in Section~\ref{sec:guidelines}.
 \end{example}
 
 % ===========================================================================
@@ -1731,7 +1793,7 @@ drone = sys.build()
 r = solve(drone, {"endurance": 300.0,
                   "extra_payload": 0.5,
                   "extra_power": 5.0})
-# r.antichain -> Antichain[(total_mass=0.56 kg)]
+# r.antichain -> Antichain[(total_mass=0.55 kg)]
 \end{lstlisting}
 \texttt{build()} bundles every subsystem's R into a single Kleene
 axis and closes the loop automatically. The constraint graph can
@@ -1781,9 +1843,11 @@ message identifying the missing or invalid item.
 \label{sec:examples}
 % ===========================================================================
 
-The package ships twelve runnable examples under \texttt{examples/}
-and the same twelve as executed notebooks under \texttt{notebooks/}.
-Each is referenced below by its filename.
+The package ships 23 runnable examples under \texttt{examples/} and the
+same 23 as executed notebooks under \texttt{notebooks/}. Each is
+referenced below by its filename. This section walks through examples
+1--17; the temporal examples 18--23 are covered in
+Section~\ref{sec:temporal}.
 
 \subsection{Example 1: the drone (Fig. 48 of the paper)}
 
@@ -1930,10 +1994,10 @@ the sweep, reusing the previous fixed point, takes roughly 10\,\%
 fewer total Kleene steps), stochastic sun hours via
 \texttt{Stochastic}, and the full visualisation suite.
 
-\subsection{Example 14: online elimination over a robot catalogue}
+\subsection{Example 14: online elimination over a robot catalog}
 
 \texttt{14\_online\_fleet.py}. A logistics service must hit a
-target throughput and range from a catalogue of 200 candidate robot
+target throughput and range from a catalog of 200 candidate robot
 types, each described by four features (speed, payload, unit cost,
 energy per km). The exhaustive solve runs 200 inner solves; the
 online solver from \texttt{codesign.online} prunes by an
@@ -1970,7 +2034,7 @@ The cycle that the Kleene iteration resolves: higher titer demand
 forces higher peak cell density, which inflates the metabolic burden
 through the feed strategy, which inflates the cell density required
 to deliver the same titer, which in turn drives the bioreactor and
-media catalogue lookups. The outer Pareto front in
+media catalog lookups. The outer Pareto front in
 $(\text{COGS}, \text{footprint}, \text{CO}_2 \text{ per gram})$
 contains a genuine two-point tradeoff between CHO-K1 (low licence
 fee, long batch, larger footprint per year) and CHO-MK (high licence
@@ -2378,7 +2442,7 @@ the DP optimum matches the brute-force optimum exactly.
 The example and notebook 23 also regenerate the paper's three key figures
 \emph{in the same format}, for visual comparison: the race-time-versus-wear
 Pareto fronts per battery size and initial age (the paper's Fig.~1, with
-the fastest-implementation node A and a trade-off node B highlighted), the
+the fastest-implementation node A and a tradeoff node B highlighted), the
 grid-start position penalty $\mu_{\mathrm{pos}} \pm \sigma_{\mathrm{pos}}$
 with its zero-crossing at the reference slot, saturation beyond roughly
 P12, and harder-track ordering (the paper's Fig.~2), and the
@@ -2448,11 +2512,11 @@ Markov-state-model protocol optimisation [32] as the dynamic backbone.
 
 Protein design inherently trades competing objectives, stability, function,
 solubility, immunogenicity, and manufacturability, and Pareto-based
-multi-objective sampling produces candidate sets spanning these trade-offs
+multi-objective sampling produces candidate sets spanning these tradeoffs
 for informed downstream selection [33]. This is a co-design antichain over
 design objectives. Recent methods make the front explicit: ST-PARM aligns
 inference-time generation to a controllable stability-versus-function
-trade-off; MosPro and NSGA-2 variants produce Pareto-optimal sequence sets;
+tradeoff; MosPro and NSGA-2 variants produce Pareto-optimal sequence sets;
 MAProt negotiates a structure-versus-function consensus across agents. The
 temporal and online angle is closed-loop directed evolution: frameworks
 such as EVOLVEpro couple a generative or predictive model with iterative

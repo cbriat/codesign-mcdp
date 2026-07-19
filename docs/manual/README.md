@@ -9,22 +9,43 @@ Source for the user manual.
 
 ## Rebuilding
 
-You need a working LaTeX distribution. On Debian/Ubuntu:
+You need a working LaTeX distribution (TeX Live or MiKTeX). On
+Debian/Ubuntu:
 
 ```bash
 sudo apt install texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
 ```
 
-Then from this directory:
+The manual has no bibliography database (references are a plain numbered
+list), so no `bibtex`/`biber` pass is required — but it does need two
+LaTeX passes so the table of contents and the cross-references resolve.
+
+From this directory, either use the Makefile:
 
 ```bash
-make
-# or, directly:
-pdflatex codesign-mcdp-manual.tex
-pdflatex codesign-mcdp-manual.tex   # second pass populates the TOC
+make            # runs pdflatex twice
 ```
+
+or, if you have `latexmk`, let it manage the passes automatically:
+
+```bash
+latexmk -pdf codesign-mcdp-manual.tex
+```
+
+or run `pdflatex` by hand:
+
+```bash
+pdflatex codesign-mcdp-manual.tex
+pdflatex codesign-mcdp-manual.tex   # second pass populates TOC and refs
+```
+
+The document builds cleanly with `pdflatex` (TeX Live 2025). A handful of
+`Overfull \hbox` warnings from long code-listing lines and bibliography
+entries are cosmetic and can be ignored.
 
 ## Cleanup
 
-`make clean` removes intermediate `.aux`, `.log`, `.toc`, `.out` files.
-`make distclean` also removes the `.pdf`.
+`make clean` removes intermediate `.aux`, `.log`, `.toc`, `.out` and
+`latexmk` bookkeeping files. `make distclean` also removes the `.pdf`.
+With `latexmk`, `latexmk -c` cleans auxiliary files and `latexmk -C`
+also removes the `.pdf`.
