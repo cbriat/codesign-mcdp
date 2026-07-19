@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **Vectorized `MonotonicityEvaluator.bound()` and
+  `LipschitzEvaluator.bound()`** (`codesign/online.py`). Both evaluators
+  previously re-scanned the entire observation history with a
+  Python-level per-observation loop on every `bound()` call, so an
+  Algorithm-1-style elimination loop (one `bound()` per surviving
+  candidate while the history grows to the budget) cost O(budget^2)
+  Python work and dominated paper-scale runs. The scan is now performed
+  with numpy over an incrementally-maintained observation matrix
+  (amortized O(1) append in `observe()`): the join over observed
+  predecessors / meet over successors (monotonicity) and the
+  `max(r - L*dist)` cone bound (Lipschitz) are computed as vectorized
+  array reductions. This keeps the per-call cost O(history) but removes
+  the Python-loop constant, measuring 8-16x faster on the growing-history
+  workload (N=4000 single run drops from ~6-8 s to well under 1 s). The
+  bounds returned are unchanged (a pure performance change; equivalence
+  to a naive reference is pinned by `tests/test_online_bound_perf.py`
+  over 224 random scenarios and edge cases, max deviation 0). A
+  pure-Python fallback is retained for when numpy is unavailable, and
+  the public evaluator API and semantics are unchanged.
+
 ### Changed
 - **Certified `LinearParametricEvaluator`** (`codesign/online.py`). The
   online-learning linear-parametric evaluator was reimplemented as the

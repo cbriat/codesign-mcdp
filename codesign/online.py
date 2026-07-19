@@ -65,6 +65,20 @@ def _import_numpy():
         ) from e
 
 
+def _try_numpy():
+    """Return the numpy module if importable, else ``None``.
+
+    Unlike :func:`_import_numpy`, this never raises: it lets the
+    evaluators select a numpy-vectorized fast path when numpy is present
+    while keeping a pure-Python fallback when it is not.
+    """
+    try:
+        import numpy as np
+        return np
+    except ImportError:
+        return None
+
+
 def _import_linprog_or_die():
     try:
         from scipy.optimize import linprog
@@ -148,6 +162,53 @@ class OptimisticEvaluator:
         self.features = list(features)
         self.r_components = list(r_components)
         self._obs: List[_Observation] = []
+        # Incremental numpy buffers mirroring ``self._obs`` for the
+        # vectorized bound() fast path (see MonotonicityEvaluator /
+        # LipschitzEvaluator). ``self._np`` is None when numpy is absent,
+        # in which case the buffers are never populated and bound() falls
+        # back to the pure-Python rescan.
+        self._np = _try_numpy()
+        self._feat_buf = None   # (cap, n_features) growable observation matrix
+        self._sum_buf = None    # (cap, n_r) summary matrix, NaN where missing
+        self._n = 0             # number of valid rows in the buffers
+        self._cap = 0           # allocated capacity
+        self._reset_buffers()
+
+    # ------------------------------------------------------------------ #
+    # Incremental observation buffers (numpy fast path)
+    # ------------------------------------------------------------------ #
+
+    def _reset_buffers(self) -> None:
+        np = self._np
+        self._n = 0
+        if np is None:
+            self._feat_buf = None
+            self._sum_buf = None
+            self._cap = 0
+            return
+        self._cap = 8
+        self._feat_buf = np.empty((self._cap, len(self.features)), dtype=float)
+        self._sum_buf = np.empty((self._cap, len(self.r_components)), dtype=float)
+
+    def _append_to_buffers(self, feat: Sequence[float],
+                           summary: Mapping[str, float]) -> None:
+        np = self._np
+        if np is None:
+            return
+        if self._n >= self._cap:
+            new_cap = max(8, self._cap * 2)
+            fb = np.empty((new_cap, self._feat_buf.shape[1]), dtype=float)
+            fb[:self._n] = self._feat_buf[:self._n]
+            sb = np.empty((new_cap, self._sum_buf.shape[1]), dtype=float)
+            sb[:self._n] = self._sum_buf[:self._n]
+            self._feat_buf = fb
+            self._sum_buf = sb
+            self._cap = new_cap
+        self._feat_buf[self._n, :] = feat
+        for j, k in enumerate(self.r_components):
+            v = summary.get(k)
+            self._sum_buf[self._n, j] = np.nan if v is None else v
+        self._n += 1
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -156,6 +217,7 @@ class OptimisticEvaluator:
     def reset(self) -> None:
         """Forget every observation."""
         self._obs = []
+        self._reset_buffers()
 
     def observe(self, candidate_id: int, candidate: Mapping[str, Any],
                 antichain: Antichain) -> None:
@@ -168,6 +230,7 @@ class OptimisticEvaluator:
             antichain=antichain,
             summary=summary,
         ))
+        self._append_to_buffers(feat, summary)
 
     def bound(self, candidate: Mapping[str, Any]
               ) -> Tuple[Dict[str, float], Dict[str, float]]:
@@ -200,6 +263,37 @@ class MonotonicityEvaluator(OptimisticEvaluator):
 
     def bound(self, candidate):
         feat = _feature_vector(candidate, self.features)
+        np = self._np
+        if np is None:
+            return self._bound_python(feat)
+        n = self._n
+        lo = {k: 0.0 for k in self.r_components}
+        hi = {k: float("inf") for k in self.r_components}
+        if n == 0:
+            return lo, hi
+        # Vectorized rescan of the whole history: O(n * (n_features + n_r))
+        # numpy work per call, with a tiny constant (no per-observation
+        # Python loop), versus the O(n * n_features * n_r) Python-level
+        # loop of _bound_python. Same result, exact to float comparisons.
+        F = self._feat_buf[:n]           # (n, n_features)
+        S = self._sum_buf[:n]            # (n, n_r), NaN where summary missing
+        q = np.asarray(feat, dtype=float)
+        geq = (q >= F).all(axis=1)       # obs is a predecessor -> lower bound
+        leq = (q <= F).all(axis=1)       # obs is a successor   -> upper bound
+        finite = np.isfinite(S)
+        # lower[k] = max(0, max_{predecessors, finite} S[:,k]); missing -> 0.
+        masked_lo = np.where(geq[:, None] & finite, S, -np.inf)
+        lo_vals = np.maximum(0.0, masked_lo.max(axis=0))
+        # upper[k] = min_{successors, finite} S[:,k]; none -> +inf.
+        masked_hi = np.where(leq[:, None] & finite, S, np.inf)
+        hi_vals = masked_hi.min(axis=0)
+        for j, k in enumerate(self.r_components):
+            lo[k] = float(lo_vals[j])
+            hi[k] = float(hi_vals[j])
+        return lo, hi
+
+    def _bound_python(self, feat):
+        """Pure-Python fallback (numpy unavailable). Full-history rescan."""
         lo = {k: 0.0 for k in self.r_components}
         hi = {k: float("inf") for k in self.r_components}
         for obs in self._obs:
@@ -233,9 +327,48 @@ class LipschitzEvaluator(OptimisticEvaluator):
             self.L: Dict[str, float] = {k: float(L) for k in r_components}
         else:
             self.L = {k: float(L[k]) for k in r_components}
+        # Per-coordinate Lipschitz constants as a row vector for the
+        # vectorized bound() fast path (None when numpy is unavailable).
+        self._L_arr = (
+            self._np.array([self.L[k] for k in self.r_components], dtype=float)
+            if self._np is not None else None
+        )
 
     def bound(self, candidate):
         feat = _feature_vector(candidate, self.features)
+        np = self._np
+        if np is None:
+            return self._bound_python(feat)
+        n = self._n
+        lo = {k: 0.0 for k in self.r_components}
+        hi = {k: float("inf") for k in self.r_components}
+        if n == 0:
+            return lo, hi
+        # Vectorized: compute all observation distances at once, then the
+        # cone bounds per resource coordinate. O(n * (n_features + n_r))
+        # numpy work per call with a tiny constant, versus the per-obs
+        # Python loop of _bound_python. Distances match the scalar
+        # math.sqrt(sum(...)) to within ~1e-12 (numpy pairwise summation).
+        F = self._feat_buf[:n]                       # (n, n_features)
+        S = self._sum_buf[:n]                        # (n, n_r)
+        q = np.asarray(feat, dtype=float)
+        diff = F - q
+        dist = np.sqrt((diff * diff).sum(axis=1))    # (n,)
+        Ld = dist[:, None] * self._L_arr[None, :]    # (n, n_r)
+        finite = np.isfinite(S)
+        # lower[k] = max(0, max_{finite} (S - L*d)); missing -> 0.
+        lower = np.where(finite, np.maximum(0.0, S - Ld), -np.inf)
+        lo_vals = np.maximum(0.0, lower.max(axis=0))
+        # upper[k] = min_{finite} (S + L*d); none -> +inf.
+        upper = np.where(finite, S + Ld, np.inf)
+        hi_vals = upper.min(axis=0)
+        for j, k in enumerate(self.r_components):
+            lo[k] = float(lo_vals[j])
+            hi[k] = float(hi_vals[j])
+        return lo, hi
+
+    def _bound_python(self, feat):
+        """Pure-Python fallback (numpy unavailable). Full-history rescan."""
         lo = {k: 0.0 for k in self.r_components}
         hi = {k: float("inf") for k in self.r_components}
         if not self._obs:
