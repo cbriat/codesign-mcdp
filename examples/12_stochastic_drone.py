@@ -18,6 +18,11 @@ summary can be requested in the same call if a ``uncertain_set`` is
 also attached. Here we include it to show that all four summaries
 behave consistently: nominal < mean < p95 < cvar95 < worst_case.
 
+The nominal parameters (specific_energy = 2.0 MJ/kg, efficiency = 0.90)
+have a product of 1.8 MJ/kg of delivered energy density, so the nominal
+solve converges to the canonical drone's 0.5492 kg (examples 1/6/7); the
+marginals perturb around that shared reference.
+
 Running this script prints the nominal mass, the four statistical
 summaries, a bar chart of their ordering, and an ASCII histogram of
 the sampled total_mass distribution. No figures are produced.
@@ -46,7 +51,7 @@ class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
 
-    def __init__(self, specific_energy: float = 1.8e6, efficiency: float = 0.85):
+    def __init__(self, specific_energy: float = 2.0e6, efficiency: float = 0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
@@ -72,16 +77,16 @@ def make_drone():
 
     # Set-based (deterministic) uncertainty
     bat.uncertain_set = Box(
-        specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-        efficiency=(0.80, 0.90, "more_is_better"),
+        specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+        efficiency=(0.83, 0.97, "more_is_better"),
     )
 
     # Stochastic uncertainty with a positive correlation between the
     # two parameters.
     bat.uncertain_dist = Stochastic(
         marginals={
-            "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),  # U[1.6, 2.0]e6
-            "efficiency":      stats.uniform(loc=0.80, scale=0.10),    # U[0.80, 0.90]
+            "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),  # U[1.7, 2.3]e6
+            "efficiency":      stats.uniform(loc=0.83, scale=0.14),    # U[0.83, 0.97]
         },
         copula=GaussianCopula(correlation=[[1.0, 0.4],
                                            [0.4, 1.0]]),

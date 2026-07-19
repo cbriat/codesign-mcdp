@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public evaluator API and semantics are unchanged.
 
 ### Changed
+- **Unified the drone model across examples** (`examples/11_uncertain_drone.py`, `examples/12_stochastic_drone.py`). The uncertainty-demo drone's nominal battery parameters were re-parameterised to `specific_energy=2.0e6, efficiency=0.9` so their product (1.8 MJ/kg delivered) reduces exactly to the canonical drone of examples 01/06/07: the nominal solve now converges to the same 0.5492 kg (was 0.5602 kg). Uncertainty sets were recentred/widened to keep the Box/Ellipsoid/Monte-Carlo spreads meaningful; manual, notebooks, and smoke tests updated to match.
 - **Certified `LinearParametricEvaluator`** (`codesign/online.py`). The
   online-learning linear-parametric evaluator was reimplemented as the
   certified optimistic bound of Alharbi, Dahleh & Zardini

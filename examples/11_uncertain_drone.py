@@ -6,6 +6,12 @@ parameters (specific energy and efficiency) that are known only up to an
 uncertainty set. The user-facing question is: under the worst-case point
 of that set, how heavy is the drone?
 
+The nominal parameters (specific_energy = 2.0 MJ/kg, efficiency = 0.90)
+are chosen so their product, 1.8 MJ/kg of *delivered* energy density,
+matches the canonical drone of examples 1/6/7. The nominal solve
+therefore converges to the same 0.5492 kg; the uncertainty sets perturb
+around that shared reference.
+
 Two sets are exercised:
 
 - a :class:`Box`: rectangular ranges on the two parameters, with each
@@ -40,7 +46,7 @@ class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
 
-    def __init__(self, specific_energy: float = 1.8e6, efficiency: float = 0.85):
+    def __init__(self, specific_energy: float = 2.0e6, efficiency: float = 0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
@@ -80,7 +86,8 @@ if __name__ == "__main__":
     f = {"endurance": 300.0, "extra_payload": 0.5, "extra_power": 5.0}
 
     # ----- Nominal -----
-    print("Nominal parameters (specific_energy=1.8 MJ/kg, efficiency=0.85):")
+    print("Nominal parameters (specific_energy=2.0 MJ/kg, efficiency=0.90):")
+    print("   -> delivered 1.8 MJ/kg, same as the canonical drone (ex. 1/6/7)")
     bat = Battery()
     drone = make_drone(bat)
     r0 = solve(drone, f)
@@ -89,12 +96,12 @@ if __name__ == "__main__":
 
     # ----- Box uncertainty -----
     print("Box uncertainty:")
-    print("   specific_energy in [1.6, 2.0] MJ/kg  (more is better)")
-    print("   efficiency      in [0.80, 0.90]      (more is better)")
+    print("   specific_energy in [1.7, 2.3] MJ/kg  (more is better)")
+    print("   efficiency      in [0.83, 0.97]      (more is better)")
     bat = Battery()
     bat.uncertain_set = Box(
-        specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-        efficiency=(0.80, 0.90, "more_is_better"),
+        specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+        efficiency=(0.83, 0.97, "more_is_better"),
     )
     drone = make_drone(bat)
     r_box = solve(drone, f, uncertainty=["worst_case"])
@@ -106,12 +113,12 @@ if __name__ == "__main__":
 
     # ----- Ellipsoid uncertainty -----
     print("Ellipsoid uncertainty (smaller, correlated set):")
-    print("   center (1.8 MJ/kg, 0.85), covariance:")
+    print("   center (2.0 MJ/kg, 0.90), covariance:")
     print("       [[ 1.0e10  -2.0e3 ],")
     print("        [-2.0e3   2.5e-3]]")
     bat = Battery()
     bat.uncertain_set = Ellipsoid(
-        center={"specific_energy": 1.8e6, "efficiency": 0.85},
+        center={"specific_energy": 2.0e6, "efficiency": 0.9},
         cov=[
             [1.0e10, -2.0e3],
             [-2.0e3, 2.5e-3],

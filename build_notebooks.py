@@ -1217,6 +1217,8 @@ NB_11 = [
 
 The drone from notebook 07 is extended so the battery has two internal parameters (specific energy, efficiency) that are known only up to an uncertainty set. The question is: under the worst-case point of that set, how heavy does the drone become?
 
+The nominal parameters (specific_energy = 2.0 MJ/kg, efficiency = 0.90) have a product of 1.8 MJ/kg of *delivered* energy density, so the nominal solve converges to exactly the canonical drone's 0.5492 kg (notebooks 01/06/07). The uncertainty sets perturb around that shared reference.
+
 Two sets are exercised:
 
 - A `Box`: rectangular ranges on the two parameters, with each range declared in the "more is better" direction so the worst case is the corner where both parameters take their lowest values.
@@ -1230,7 +1232,7 @@ Set-based uncertainty fits MCDP naturally: monotonicity means the worst case is 
 class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
-    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+    def __init__(self, specific_energy=2.0e6, efficiency=0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
@@ -1264,15 +1266,15 @@ nominal_mass = list(nominal.antichain.points)[0]["total_mass"]
 print(f"nominal total_mass = {nominal_mass:.4f} kg")"""),
     ("md", """## Box uncertainty
 
-The Box puts independent ranges on each parameter. Because both are declared "more is better," the worst case is the single corner where specific_energy = 1.6e6 and efficiency = 0.80.
+The Box puts independent ranges on each parameter. Because both are declared "more is better," the worst case is the single corner where specific_energy = 1.7e6 and efficiency = 0.83.
 """),
     ("code", """bat = Battery()
 # Box: independent ranges on each parameter. The direction-of-badness token
 # tells the solver which endpoint is the "worst" - for both parameters here,
 # lower is worse since they're declared "more_is_better".
 bat.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
 drone = make_drone(bat)
 
@@ -1290,7 +1292,7 @@ The Ellipsoid carves out the implausible corner where both parameters are simult
 # specific_energy makes optimistic on efficiency more likely, and vice
 # versa. The worst case is therefore not the joint-pessimistic corner.
 bat.uncertain_set = Ellipsoid(
-    center={"specific_energy": 1.8e6, "efficiency": 0.85},
+    center={"specific_energy": 2.0e6, "efficiency": 0.9},
     cov=[
         [1.0e10, -2.0e3],     # variance of specific_energy, covariance
         [-2.0e3,  2.5e-3],    # covariance, variance of efficiency
@@ -1310,9 +1312,9 @@ print(f"Ellipsoid worst case: {wc_ell:.4f} kg  (penalty {wc_ell - nominal_mass:+
 
 | Set       | Worst-case mass | Penalty vs nominal |
 |-----------|-----------------|--------------------|
-| (nominal) | 0.5602 kg       | -                  |
-| Box       | 0.5760 kg       | +0.0158 kg         |
-| Ellipsoid | 0.5652 kg       | +0.0050 kg         |
+| (nominal) | 0.5492 kg       | -                  |
+| Box       | 0.5668 kg       | +0.0176 kg         |
+| Ellipsoid | 0.5527 kg       | +0.0035 kg         |
 
 The ellipsoid is the more honest model when you believe the two parameters are correlated, since it rejects the "both at the worst simultaneously" combination as implausible. The 2D conveniences `Disk(center, radius)` and `Circle(center, radius)` are special cases of `Ellipsoid`.
 """),
@@ -1339,7 +1341,7 @@ from codesign import (
 class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
-    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+    def __init__(self, specific_energy=2.0e6, efficiency=0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
@@ -1355,8 +1357,8 @@ class Actuator(Module):
 bat = Battery()
 # Set-based bracket: the Box gives a deterministic worst-case answer.
 bat.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
 # Stochastic model: two uniform marginals tied by a Gaussian copula.
 # The 0.4 off-diagonal entry means specific_energy and efficiency are
@@ -1364,8 +1366,8 @@ bat.uncertain_set = Box(
 # be efficient too), softening the joint-pessimistic case.
 bat.uncertain_dist = Stochastic(
     marginals={
-        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+        "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+        "efficiency":      stats.uniform(loc=0.83, scale=0.14),
     },
     copula=GaussianCopula(correlation=[[1.0, 0.4],
                                        [0.4, 1.0]]),

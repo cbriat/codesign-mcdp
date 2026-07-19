@@ -322,7 +322,7 @@ def test_uncertainty_box():
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
         R = {"mass":     Reals(unit="kg")}
-        def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        def __init__(self, specific_energy=2.0e6, efficiency=0.9):
             self.specific_energy = specific_energy
             self.efficiency = efficiency
             super().__init__()
@@ -337,8 +337,8 @@ def test_uncertainty_box():
 
     b = Battery()
     b.uncertain_set = Box(
-        specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-        efficiency=(0.80, 0.90, "more_is_better"),
+        specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+        efficiency=(0.83, 0.97, "more_is_better"),
     )
 
     sys = System("drone")
@@ -366,8 +366,8 @@ def test_uncertainty_box():
 
     # And the battery's parameters should have been restored to their
     # nominal values after the solve.
-    assert b.specific_energy == 1.8e6, b.specific_energy
-    assert b.efficiency == 0.85, b.efficiency
+    assert b.specific_energy == 2.0e6, b.specific_energy
+    assert b.efficiency == 0.9, b.efficiency
 
     print(f"nominal mass={nominal_mass:.4f} kg, worst-case mass={worst_mass:.4f} kg")
 
@@ -385,7 +385,7 @@ def test_uncertainty_stochastic():
     class Battery(Module):
         F = {"capacity": Reals(unit="J")}
         R = {"mass":     Reals(unit="kg")}
-        def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+        def __init__(self, specific_energy=2.0e6, efficiency=0.9):
             self.specific_energy = specific_energy
             self.efficiency = efficiency
             super().__init__()
@@ -401,8 +401,8 @@ def test_uncertainty_stochastic():
     b = Battery()
     b.uncertain_dist = Stochastic(
         marginals={
-            "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-            "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+            "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+            "efficiency":      stats.uniform(loc=0.83, scale=0.14),
         },
         copula=GaussianCopula(correlation=[[1.0, 0.4], [0.4, 1.0]]),
     )

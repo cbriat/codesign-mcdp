@@ -879,11 +879,11 @@ result = solve(drone, {"endurance":      300.0,
 print(result.status)         # "converged"
 print(result.iterations)     # e.g. 17
 print(result.feasible)       # True
-print(result.antichain)      # Antichain[(total_mass=0.56 kg)]
+print(result.antichain)      # Antichain[(total_mass=0.55 kg)]
 
 # Scalarise: cheapest design under a custom cost function
 best = minimize_cost(result, cost_fn=lambda r: r["total_mass"])
-print(best)                  # {"total_mass": 0.5602}
+print(best)                  # {"total_mass": 0.5492}
 \end{lstlisting}
 \end{example}
 
@@ -1051,12 +1051,14 @@ class Battery(Module):
     F = {"capacity": Reals(unit="J")}
     R = {"mass":     Reals(unit="kg")}
 
-    def __init__(self, specific_energy=1.8e6, efficiency=0.85):
+    def __init__(self, specific_energy=2.0e6, efficiency=0.9):
         self.specific_energy = specific_energy
         self.efficiency = efficiency
         super().__init__()
 
     def h(self, f):
+        # nominal product 2.0e6 * 0.9 = 1.8 MJ/kg delivered,
+        # matching the canonical drone (examples 1/6/7)
         return {"mass": f["capacity"]
                        / (self.specific_energy * self.efficiency)}
 
@@ -1081,10 +1083,10 @@ directions declared, the worst case is a single corner read off in
 constant time:
 \begin{lstlisting}
 b.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
-# worst case = (specific_energy=1.6e6, efficiency=0.80)
+# worst case = (specific_energy=1.7e6, efficiency=0.83)
 \end{lstlisting}
 When some directions are undeclared, all $2^n$ endpoint combinations
 are evaluated and the worst is kept; cheap when $n$ is modest.
@@ -1096,7 +1098,7 @@ parameters, so an ellipsoid is a more honest model than a box when
 parameters are believed to vary together:
 \begin{lstlisting}
 b.uncertain_set = Ellipsoid(
-    center={"specific_energy": 1.8e6, "efficiency": 0.85},
+    center={"specific_energy": 2.0e6, "efficiency": 0.9},
     cov=[
         [1.0e10, -2.0e3],
         [-2.0e3,  2.5e-3],
@@ -1129,8 +1131,8 @@ from scipy import stats
 
 b.uncertain_dist = Stochastic(
     marginals={
-        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+        "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+        "efficiency":      stats.uniform(loc=0.83, scale=0.14),
     },
     copula=GaussianCopula(correlation=[[1.0, 0.4],
                                         [0.4, 1.0]]),
@@ -1196,14 +1198,14 @@ the corner where both parameters take their worst endpoint:
 \begin{lstlisting}
 bat = Battery()  # the Module subclass from example~7
 bat.uncertain_set = Box(
-    specific_energy=(1.6e6, 2.0e6, "more_is_better"),
-    efficiency=(0.80, 0.90, "more_is_better"),
+    specific_energy=(1.7e6, 2.3e6, "more_is_better"),
+    efficiency=(0.83, 0.97, "more_is_better"),
 )
 # ... wire `bat` into the drone system ...
 
 result = solve(drone, f, uncertainty=["worst_case"])
 worst_mass = list(result.worst_case.antichain.points)[0]["total_mass"]
-# worst_mass = 0.5760 kg, versus 0.5602 kg nominal
+# worst_mass = 0.5668 kg, versus 0.5492 kg nominal
 \end{lstlisting}
 \end{example}
 
@@ -1216,8 +1218,8 @@ from scipy import stats
 
 bat.uncertain_dist = Stochastic(
     marginals={
-        "specific_energy": stats.uniform(loc=1.6e6, scale=0.4e6),
-        "efficiency":      stats.uniform(loc=0.80, scale=0.10),
+        "specific_energy": stats.uniform(loc=1.7e6, scale=0.6e6),
+        "efficiency":      stats.uniform(loc=0.83, scale=0.14),
     },
     copula=GaussianCopula(correlation=[[1.0, 0.4],
                                         [0.4, 1.0]]),
@@ -1226,9 +1228,9 @@ bat.uncertain_dist = Stochastic(
 res = solve(drone, f,
             uncertainty=["mean", "p95", "cvar95", "samples"],
             n_samples=1000, rng_seed=42)
-# res.mean["total_mass"]    -> 0.5613 kg
-# res.p95["total_mass"]     -> 0.5729 kg
-# res.cvar95["total_mass"]  -> 0.5742 kg
+# res.mean["total_mass"]    -> 0.5506 kg
+# res.p95["total_mass"]     -> 0.5632 kg
+# res.cvar95["total_mass"]  -> 0.5647 kg
 # len(res.samples)          -> 1000
 \end{lstlisting}
 \end{example}
@@ -1607,7 +1609,7 @@ res = solve(drone, f,
             uncertainty=["mean", "p95", "cvar95", "samples"],
             n_samples=1000, rng_seed=42)
 ax = viz.plot_uncertainty(res, port="total_mass",
-                          nominal=0.5602, bins=30)
+                          nominal=0.5492, bins=30)
 \end{lstlisting}
 The function reads the requested summaries off the result and
 labels them automatically.
@@ -1998,13 +2000,16 @@ of the Kleene iteration to machine precision.
 \subsection{Example 11: set-based deterministic uncertainty}
 
 \texttt{11\_uncertain\_drone.py}. The drone's battery has two
-internal parameters (specific energy, efficiency) declared with
-"more is better" directions. First a \texttt{Box} with independent
-ranges, then a tilted \texttt{Ellipsoid} of the same widths. The
-worst-case mass under the box is +0.0158\,kg above nominal; under the
-ellipsoid it is +0.0050\,kg. The discrepancy is the cost of admitting
-the implausible corner where both parameters are simultaneously at
-their worst; the ellipsoid model rejects it explicitly.
+internal parameters (specific energy, efficiency) whose nominal
+product, 1.8\,MJ/kg delivered, reduces to the canonical drone of
+examples 1/6/7: the nominal solve converges to the same
+0.5492\,kg. Both are declared with "more is better" directions.
+First a \texttt{Box} with independent ranges, then a tilted
+\texttt{Ellipsoid}. The worst-case mass under the box is
++0.0176\,kg above nominal; under the ellipsoid it is +0.0035\,kg.
+The discrepancy is the cost of admitting the implausible corner
+where both parameters are simultaneously at their worst; the
+ellipsoid model rejects it explicitly.
 
 \subsection{Example 12: stochastic uncertainty with a Gaussian copula}
 
