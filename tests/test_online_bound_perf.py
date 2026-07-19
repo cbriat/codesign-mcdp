@@ -87,14 +87,19 @@ def _cand(features, vec):
     return {f: v for f, v in zip(features, vec)}
 
 
-def _assert_equal(lo_new, hi_new, lo_ref, hi_ref, tol=1e-12):
-    assert set(lo_new) == set(lo_ref)
+def _assert_equal(lo_new, hi_new, lo_ref, hi_ref):
+    # The vectorized and pure-Python paths agree to machine epsilon, but the
+    # numpy pairwise-summed distance can differ from the scalar left-to-right
+    # sum by 1-2 ULP, which is ~1e-11 on bound values of magnitude ~1e4. Use a
+    # relative tolerance (with a small absolute floor for values near zero).
     for k in lo_ref:
         for a, b in ((lo_new[k], lo_ref[k]), (hi_new[k], hi_ref[k])):
             if math.isinf(a) or math.isinf(b):
                 assert a == b, f"inf mismatch {a} vs {b} at {k}"
             else:
-                assert abs(a - b) <= tol, f"dev {abs(a - b)} ({a} vs {b}) at {k}"
+                assert math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12), (
+                    f"dev {abs(a - b)} ({a} vs {b}) at {k}")
+    assert set(lo_new) == set(lo_ref)
 
 
 def _rand_point(r_components, rng):
