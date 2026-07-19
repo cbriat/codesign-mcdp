@@ -30,6 +30,7 @@ on GitHub without running anything.
 | 21 | [`21_reconfigurable_robot.ipynb`](21_reconfigurable_robot.ipynb) | Vector-state co-design: a self-reconfiguring robot carrying a three-axis state (two module wear levels plus energy), spreading wear across modules. Pareto-front plot and the vector monotonicity guard. |
 | 22 | [`22_online_feedback_codesign.ipynb`](22_online_feedback_codesign.ipynb) | Online feedback co-design: an adaptive sensor node that re-solves its co-design each step against its measured battery charge and live demand. Closed-loop audit trail and a charge/demand/config plot. |
 | 23 | [`23_formula1_season.ipynb`](23_formula1_season.ipynb) | Hierarchical co-design for a Formula 1 season (precompute-then-DP): race-level co-design frozen into a Pareto catalog, then a season MDP maximising expected championship points. Reproduces the paper's Fig. 1 race front and its two findings. |
+| 24 | [`24_car_catalog_codesign.ipynb`](24_car_catalog_codesign.ipynb) | Catalog-driven full-vehicle co-design: one 12-row architecture table plus one `build_architecture()` spans ICE/MHEV/FHEV/PHEV/REEV/BEV, closing the mass and BEV-energy spirals. Feasibility table, (cost, energy, mass) Pareto front, and powertrain-class comparison. |
 
 ## Running locally
 
