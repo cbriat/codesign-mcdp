@@ -594,7 +594,11 @@ automatically. In BibTeX:
 }
 ```
 
-Please also cite the underlying theory, Censi (2015) (see References below).
+Citing the software is not a substitute for citing the theory. Please cite
+Censi (2015) for the monotone co-design framework itself, and the paper behind
+whichever layer you use: Censi (2017) for uncertainty, Alharbi et al. (2026)
+for the online-learning layer, and the relevant application paper from the
+co-design group. See the References section below for full details.
 
 ## License
 
@@ -603,4 +607,8 @@ MIT. See [LICENSE](LICENSE).
 ## References
 
 * Andrea Censi, *A Mathematical Theory of Co-Design*, arXiv:1512.08055 (2015).
+* Andrea Censi, *Uncertainty in Monotone Co-Design Problems*, IEEE Robotics and Automation Letters 2(3):1556-1563 (2017), arXiv:1609.03103.
+* Meshal Alharbi, Munther A. Dahleh, and Gioele Zardini, *Compositional Online Learning for Multi-Objective System Co-Design*, arXiv:2604.22624 (2026).
+* Gioele Zardini, Nicolas Lanzetti, Mauro Salazar, Andrea Censi, Emilio Frazzoli, and Marco Pavone, *On the Co-Design of AV-Enabled Mobility Systems*, 2020 IEEE 23rd International Conference on Intelligent Transportation Systems (ITSC), pages 1-8 (2020), arXiv:2003.04739.
+* Dejan Milojevic, Gioele Zardini, Miriam Elser, Andrea Censi, and Emilio Frazzoli, *CODEI: Resource-Efficient Task-Driven Co-Design of Perception and Decision Making for Mobile Robots Applied to Autonomous Vehicles*, IEEE Transactions on Robotics 41:2727-2748 (2025), arXiv:2503.10296.
 * Davey and Priestley, *Introduction to Lattices and Order*, CUP (2002).
