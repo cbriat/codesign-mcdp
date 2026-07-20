@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The user manual now attributes the underlying theory properly**
+  (`docs/manual/codesign-mcdp-manual.tex`). The manual documented a library
+  implementing monotone co-design while citing almost none of the work that
+  created it. It now carries an explicit attribution paragraph in the
+  introduction stating that the theory is Andrea Censi's and that the
+  framework was developed further by Gioele Zardini, Dejan Milojevic, and
+  colleagues, and that this library contributes software rather than theory.
+  Citations are placed next to the material they belong to: the founding
+  monograph in the mathematical background and the Kleene theorem, the
+  cyclic-constraint paper at the composition operators, the uncertainty
+  papers at the uncertainty layer, and Alharbi, Dahleh, and Zardini at the
+  online-learning layer. A new *Related Work and Further Reading* section
+  maps the literature by theme. The manual also states plainly which layers
+  are **not** from that literature: the temporal, sequential, vector-state,
+  and receding-horizon material is the author's own, is being prepared for
+  separate publication, and is described as unpublished rather than cited.
+- **The manual uses a real bibliography** (`docs/manual/references.bib`,
+  `docs/manual/Makefile`). The hand-numbered reference list and hand-written
+  bracket numbers are gone, replaced by natbib with BibTeX over a
+  `references.bib` containing all 52 entries, old and new. `plainnat` prints
+  author lists in full rather than truncating with *et al.*, since the point
+  of the change is to credit people by name; titles are brace-protected so
+  they print as published. `make` now runs the full sequence including the
+  bibliography pass and settles all cross references.
+
+### Fixed
+- **Two citation defects in the manual's reference list.** The online-learning
+  paper was credited to "Saud Alharbi"; the author is **Meshal Alharbi**. Its
+  title was given as *Compositional Online Learning for Co-Design*; the actual
+  title is *Compositional Online Learning for Multi-Objective System Co-Design*
+  (arXiv:2604.22624). Every bibliography entry in the co-design group has been
+  checked against a primary record, the arXiv API for preprints and Crossref
+  for anything with a DOI.
+
 ## [0.2.1] - 2026-07-20
 
 ### Fixed

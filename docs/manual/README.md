@@ -5,6 +5,7 @@ Source for the user manual.
 ## Files
 
 - `codesign-mcdp-manual.tex` – LaTeX source.
+- `references.bib` – bibliography database (natbib/BibTeX).
 - `codesign-mcdp-manual.pdf` – pre-built PDF (committed for convenience).
 
 ## Rebuilding
@@ -16,14 +17,16 @@ Debian/Ubuntu:
 sudo apt install texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended
 ```
 
-The manual has no bibliography database (references are a plain numbered
-list), so no `bibtex`/`biber` pass is required — but it does need two
-LaTeX passes so the table of contents and the cross-references resolve.
+The manual uses `natbib` with BibTeX over `references.bib`, so the build
+needs a `bibtex` pass between LaTeX passes, plus further LaTeX passes so
+the bibliography, the table of contents, and the cross-references all
+resolve. Everything used is part of a plain TeX Live install; no extra
+configuration is required.
 
-From this directory, either use the Makefile:
+From this directory, use the Makefile, which runs the whole sequence:
 
 ```bash
-make            # runs pdflatex twice
+make            # pdflatex, bibtex, then pdflatex three more times
 ```
 
 or, if you have `latexmk`, let it manage the passes automatically:
@@ -32,20 +35,25 @@ or, if you have `latexmk`, let it manage the passes automatically:
 latexmk -pdf codesign-mcdp-manual.tex
 ```
 
-or run `pdflatex` by hand:
+or run the tools by hand:
 
 ```bash
 pdflatex codesign-mcdp-manual.tex
-pdflatex codesign-mcdp-manual.tex   # second pass populates TOC and refs
+bibtex   codesign-mcdp-manual
+pdflatex codesign-mcdp-manual.tex
+pdflatex codesign-mcdp-manual.tex
+pdflatex codesign-mcdp-manual.tex
 ```
 
-The document builds cleanly with `pdflatex` (TeX Live 2025). A handful of
-`Overfull \hbox` warnings from long code-listing lines and bibliography
-entries are cosmetic and can be ignored.
+The document builds cleanly with `pdflatex` (TeX Live 2025): no errors, no
+undefined citations or references. A handful of `Overfull \hbox` warnings
+from long code-listing lines and bibliography entries are cosmetic and can
+be ignored.
 
 ## Cleanup
 
-`make clean` removes intermediate `.aux`, `.log`, `.toc`, `.out` and
-`latexmk` bookkeeping files. `make distclean` also removes the `.pdf`.
+`make clean` removes intermediate `.aux`, `.log`, `.toc`, `.out`, `.bbl`,
+`.blg` and `latexmk` bookkeeping files. `make distclean` also removes the
+`.pdf`.
 With `latexmk`, `latexmk -c` cleans auxiliary files and `latexmk -C`
 also removes the `.pdf`.

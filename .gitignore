@@ -68,3 +68,7 @@ ENV/
 
 # graphify knowledge-graph output
 graphify-out/
+
+# LaTeX bibliography build artifacts
+*.bbl
+*.blg

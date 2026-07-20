@@ -8,6 +8,7 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{mathtools}
+\usepackage[numbers,sort&compress]{natbib}
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{listings}
@@ -102,7 +103,7 @@ University of Life Sciences, Muttenz, Switzerland\\
 \begin{abstract}
 \noindent \codename{} is a Python library for formulating and solving
 \emph{Monotone Co-Design Problems} (MCDPs) in the framework of Censi
-(2015). A design problem is a relation between two posets, a functionality
+\citep{censi2015mathematical}. A design problem is a relation between two posets, a functionality
 poset $F$ and a resource poset $R$; given a target functionality, the
 problem asks for the antichain of minimal resources needed to deliver it.
 Design problems compose under three operators (series, parallel,
@@ -130,14 +131,14 @@ must lift the battery itself, so the battery's mass appears in the
 energy it has to supply. There is no way to fix one without fixing the
 other.
 
-Censi (2015) showed that under modest monotonicity assumptions, such
-problems have a clean algebraic theory: the relations between resources
-and functionalities form a category closed under series, parallel, and
-feedback composition, and solutions are computed by a Kleene
-fixed-point iteration in the lattice of antichains. The original
-publication included a software tool, \texttt{MCDPL}, distributed
-through \texttt{co-design.science}, which exposes the framework via a
-domain-specific language.
+\citet{censi2015mathematical} showed that under modest monotonicity
+assumptions, such problems have a clean algebraic theory: the relations
+between resources and functionalities form a category closed under
+series, parallel, and feedback composition, and solutions are computed
+by a Kleene fixed-point iteration in the lattice of antichains. The
+original publication included a software tool, \texttt{MCDPL}
+\citep{mcdpl}, distributed through \texttt{co-design.science}, which
+exposes the framework via a domain-specific language.
 
 \codename{} is a from-scratch Python implementation of the algorithmic
 core, designed around composable Python objects rather than a separate
@@ -149,6 +150,37 @@ runtime dependencies beyond the standard library; the uncertainty,
 online-learning, and visualisation layers pull in \texttt{numpy},
 \texttt{scipy}, and \texttt{matplotlib} as optional extras. The whole
 package is roughly 8000 lines of Python and is licensed under MIT.
+
+\paragraph{Attribution.} The theory implemented here is not the
+author's. Monotone co-design was introduced by Andrea Censi
+\citep{censi2015mathematical,censi2016everything}, who also established
+the treatment of cyclic constraints \citep{censi2017cyclic} and of
+uncertainty \citep{censi2017uncertainty}, and who wrote the reference
+implementation \texttt{MCDPL} \citep{mcdpl}. The framework has been
+developed since by Gioele Zardini, Dejan Milojevic, and colleagues,
+across future mobility systems
+\citep{zardini2020towards,zardini2020avmobility,zardini2023tools},
+autonomous systems and embodied intelligence
+\citep{zardini2021autonomous,zardini2021embodied,zardini2022taskdriven},
+and the co-design of perception and compute
+\citep{milojevic2025codei}, with more recent work on composable and
+distributional uncertainty
+\citep{huang2025composable,furter2026symmetric,huang2026distributional},
+categorical and scalability extensions
+\citep{riess2026quantale,cai2026scalable}, and online learning
+\citep{alharbi2026online}. \codename{} is an independent Python
+implementation of that framework. It contributes software, not theory.
+Every definition, theorem, and algorithm in
+Section~\ref{sec:theory}, and the uncertainty and online-learning
+layers, belong to the authors cited above. Users of this library should
+cite their papers, not only this manual.
+
+The temporal, sequential, vector-state, and receding-horizon layers of
+Section~\ref{sec:temporal} are the exception. Those are the author's own
+work, built on top of the monotone co-design framework rather than taken
+from it. They are being written up separately and are not yet published,
+so they carry no citation here. Section~\ref{sec:related} maps the
+literature and marks the boundary again.
 
 \paragraph{Scope of this document.} This manual covers the public API
 and the mathematical structure it implements. Section~\ref{sec:theory}
@@ -179,9 +211,14 @@ quantities use $F$, $R$, $h$, $\top$, $\bot$, $\Min$, etc.
 \label{sec:theory}
 % ===========================================================================
 
-This section recalls the formal definitions from Censi (2015) needed
-to specify the API. Proofs are omitted; the reader is referred to the
-paper for the full development.
+This section recalls the formal definitions from
+\citet{censi2015mathematical} needed to specify the API. The definitions,
+the theorems, and the fixed-point algorithm are all his; nothing in this
+section is original to this library. Proofs are omitted; the reader is
+referred to the paper for the full development. Standard order-theoretic
+background is in \citet{davey2002lattices}. The treatment of design
+problems whose constraint graph contains cycles is developed further in
+\citet{censi2017cyclic}.
 
 \subsection{Posets and Lattices}
 
@@ -304,7 +341,7 @@ reached.
 
 \subsection{The Kleene Fixed-Point Algorithm}
 
-\begin{theorem}[Censi 2015, Prop. 4]
+\begin{theorem}[\citealp{censi2015mathematical}, Prop. 4]
 \label{thm:kleene}
 For an MCDP $d = \langle F \times X, R \times X, h \rangle$ closed
 on $X$, define the operator $\Phi_f : \Antichain[R \times X] \to
@@ -669,7 +706,9 @@ plain scalar (or a list of scalars), not a dict: \texttt{rhs},
 Brackets an unknown $h$ with a known lower and upper bound. The
 optimistic mode (\texttt{lower}) yields a lower bound on the minimal
 resources; the pessimistic mode (\texttt{upper}) yields an upper
-bound. Section~VII of Censi (2015) develops the theory.
+bound. Section~VII of \citet{censi2015mathematical} develops the theory,
+and \citet{censi2017uncertainty} treats uncertainty in monotone co-design
+problems in full.
 
 \begin{lstlisting}
 UncertainDP(
@@ -717,7 +756,13 @@ function aliases (\texttt{series}, \texttt{par}, \texttt{loop}) matching
 the paper's notation. Each takes existing design problems and returns a
 new \texttt{DesignProblem}, so composites nest freely and are solved by
 the same \texttt{solve} entry point. Because the class of MCDPs is closed
-under all three, a composite is itself a monotone design problem.
+under all three, a composite is itself a monotone design problem. The
+compositional structure is the point of the framework, and is what the
+later literature builds on: modular co-design of vehicle control systems
+\citep{zardini2022taskdriven}, structured co-design of embodied
+intelligence \citep{zardini2021embodied}, and the categorical accounts of
+\citet{furter2026symmetric} and \citet{riess2026quantale} all rest on it.
+\Citet{carlone2019beyond} study what happens when monotonicity is dropped.
 
 \subsection{Series}
 
@@ -1051,6 +1096,13 @@ ax.set_title(f"converged in {r.iterations} steps")
 \label{sec:uncertainty}
 % ===========================================================================
 
+Uncertainty in monotone co-design was introduced by
+\citet{censi2017uncertainty}, and the composable and distributional
+treatments of
+\citet{huang2025composable}, \citet{furter2026symmetric}, and
+\citet{huang2026distributional} extend it. This section documents what the
+library implements, which is the set-based and stochastic part.
+
 Two kinds of parameter uncertainty are supported, declared on
 \texttt{Module} instances and consumed by the same \texttt{solve}
 entry point. Both are independent of the model's structure: a module
@@ -1258,8 +1310,8 @@ When a co-design problem has many discrete candidates (catalog
 entries, robot types, component families) and each candidate's
 inner solve is non-trivial, the naive ``evaluate every entry''
 strategy is wasteful. The \texttt{codesign.online} module implements
-the compositional online learner of Alharbi, Dahleh \& Zardini
-(\texttt{arXiv:2604.22624}): maintain history-dependent bounds on
+the compositional online learner of
+\citet{alharbi2026online}: maintain history-dependent bounds on
 each candidate's inner-solve output, evaluate the most promising one
 under the \texttt{lcb} (lower-confidence-bound) rule by default, then
 prune any candidate whose lower bound is already dominated by the
@@ -1298,8 +1350,9 @@ sensible $L$ the bound never prunes a Pareto-optimal candidate.
 \paragraph{Linear-parametric.}
 \texttt{LinearParametricEvaluator(features, r\_components,
 min\_obs=3, prior\_box=None, noise\_bound=0.0, solver="highs")}
-implements the \emph{certified} optimistic bound of Alharbi \etal\
-(Section~V-C3, eqs.\ 26--28 and Lemma~V.5). It assumes each resource
+implements the \emph{certified} optimistic bound of
+\citet{alharbi2026online} (Section~V-C3, eqs.\ 26--28 and Lemma~V.5).
+It assumes each resource
 coordinate is an \emph{exact} affine function of the features,
 $\text{req}_k(c) = \phi(c)^\top \theta_k^*$ with
 $\phi(c) = [1, features(c)]$ (the paper's noiseless linear model).
@@ -3738,7 +3791,7 @@ present; \texttt{ImportError} if numpy is absent.
 \label{ref:online}
 
 Reference cards for the compositional online learner of module
-\texttt{codesign.online} --- a port of Alharbi, Dahleh \& Zardini
+\texttt{codesign.online} --- a port of \citet{alharbi2026online}
 (\texttt{arXiv:2604.22624}). The evaluators maintain history-dependent
 bounds on each candidate's inner-solve output so that provably suboptimal
 candidates are eliminated without ever being solved;
@@ -3823,7 +3876,7 @@ lacking an R component.
 
 \paragraph{\texttt{LinearParametricEvaluator}}%
 \label{ref:online:linearparametricevaluator}
-The \emph{certified} optimistic bound of Alharbi \etal\ (Section~V-C3,
+The \emph{certified} optimistic bound of \citet{alharbi2026online} (Section~V-C3,
 eqs.\ 26--28 and Lemma~V.5). Each resource coordinate is assumed an exact
 affine function of the features, $\text{req}_k(c)=\phi(c)^\top\theta_k^*$
 with $\phi(c)=[1,features(c)]$; the evaluator maintains the confidence
@@ -5646,9 +5699,20 @@ referenced below by its filename. This section walks through examples
 1--17; the temporal, vector-state, and online examples 18--25 are covered
 in Section~\ref{sec:temporal}.
 
-\subsection{Example 1: the drone (Fig. 48 of the paper)}\label{ex:01}
+Examples 1 to 5 are reproductions of models published by
+\citet{censi2015mathematical}, and the section headings name the figure
+or section of that paper each one comes from. Example~25 replicates the
+synthetic benchmarks of \citet{alharbi2026online}. The remaining
+examples are the author's, though several are modelled on published
+case studies: the mobility and autonomous-system studies of
+\citet{zardini2020avmobility,zardini2021autonomous,zardini2022taskdriven},
+the perception and compute co-design of \citet{milojevic2025codei}, and
+the Formula~1 season study of \citet{neumann2025formula1}.
 
-\texttt{01\_drone.py}. The canonical MCDP from Censi's paper: the
+\subsection{Example 1: the drone (Fig.~48 of \citealp{censi2015mathematical})}\label{ex:01}
+
+\texttt{01\_drone.py}. The canonical MCDP from
+\citet{censi2015mathematical}: the
 ``hello world'' of monotone co-design, and the smallest complete use of
 the operator API (\texttt{FunctionDP} closed by \texttt{loop};
 see~\ref{ref:dp:functiondp} and~\ref{ref:composition:loop}).
@@ -6621,8 +6685,7 @@ energy per km). Naively this is 200 inner solves; the online solver
 (\ref{sec:online-cd}, \ref{ref:online:solve_online}) prunes provably
 suboptimal candidates using an optimistic evaluator and runs inner
 solves only for the survivors. The example reproduces the spirit of the
-multi-robot fleet study of Alharbi, Dahleh \& Zardini
-(arXiv:2604.22624).
+multi-robot fleet study of \citet{alharbi2026online}.
 
 \subsubsection*{Model}
 
@@ -6701,7 +6764,9 @@ monoclonal antibody at a target titer (g/L) and annual demand
 (kg/year). Four subsystems are coupled cyclically, and two of them are
 catalogue lookups (\ref{ref:dp:catalogdp}) resolved by the solver. This
 is the first biotech-upstream application in the library, calibrated to
-the 2024--2026 bioprocessing literature, and it uses the same
+the 2024--2026 bioprocessing literature
+\citep{yoon2003low,sou2015hypothermia,trummer2006shifting,khattak2010feed,%
+gagnon2011hipdog,reinhart2019bioprocessing,lao1997ammonium}, and it uses the same
 \texttt{System} builder (\ref{sec:system-builder}) as the engineering
 examples.
 
@@ -6867,7 +6932,12 @@ builder (\ref{sec:system-builder}) and the catalogue DP
 (\ref{ref:dp:catalogdp}) over engines, transmissions, motors, and
 battery packs. Because the file is so large, only the EV mass/energy
 loop and the sweep skeleton are quoted here; the three
-\texttt{build\_*\_car} bodies follow the same template.
+\texttt{build\_*\_car} bodies follow the same template. Component masses,
+efficiencies, and costs are calibrated from the automotive engineering
+literature
+\citep{genta2009chassis,bosch2018handbook,pulkrabek2003engine,heywood2018ice,%
+hofmann2014hybrid,naunheimer2011transmissions,iea2023evoutlook,nemry2008cars,%
+epa2024trends,larminie2012ev,mock2023pocketbook}.
 
 \subsubsection*{Model}
 
@@ -6987,6 +7057,14 @@ the theory that makes them exact. All six reuse a common decision object,
 the \texttt{Architecture} (a named wrapper around a \texttt{System}), so
 they compose with the whole rest of the framework.
 
+Unlike the rest of the manual, this section does not document published
+theory. The static co-design machinery underneath it is Censi's
+\citep{censi2015mathematical}; the temporal, sequential, vector-state, and
+receding-horizon layers built on top of it are the author's own and are
+being prepared for separate publication. They have not been peer reviewed.
+The closest published work is the hierarchical seasonal co-design of
+\citet{neumann2025formula1}, which was developed independently.
+
 \subsection{Case 1: architecture switching (\texttt{temporal})}
 
 The simplest temporal problem is \emph{switching}: a system whose best
@@ -7078,7 +7156,8 @@ regime.
 \label{sec:vector}
 
 Realistic problems carry structured state, not a lone scalar. The Formula 1
-seasonal co-design of Neumann, Zardini, and colleagues [23] carries a
+seasonal co-design of Neumann, Zardini, and colleagues
+\citep{neumann2025formula1} carries a
 state vector of two battery-wear levels plus a discrete regulatory-penalty
 flag; a self-reconfiguring robot carries the accumulated wear of each drive
 module plus a shared energy budget. The \texttt{state} module provides a
@@ -7118,7 +7197,7 @@ There are two distinct ways to combine co-design with dynamic programming,
 and they should not be conflated. The \texttt{sequential} solver above
 re-solves the co-design at every (stage, state), which is necessary when
 the per-stage functionality depends on the carried state. The Formula 1
-seasonal framework [23] uses the cheaper opposite order: the co-design
+seasonal framework \citep{neumann2025formula1} uses the cheaper opposite order: the co-design
 layer is run \emph{once} to produce track-dependent Pareto-optimal
 performance-versus-wear mappings, which are then frozen into a catalog of
 implementations that an outer finite-horizon dynamic program selects
@@ -7149,7 +7228,8 @@ by stepping the \emph{true} plant, and (v) logs a \texttt{ControlStep}.
 Because the plant is stepped with the true process rather than a nominal
 transition, any divergence between plan and execution is absorbed by the
 next sensing step, which is what distinguishes feedback from open-loop
-replay. This is the co-design instance of control co-design (CCD, [25]) in
+replay. This is the co-design instance of control co-design
+(CCD, \citealp{garciasanz2019ccd}) in
 its nested form, here the myopic variant (re-solve a single static
 co-design each step); the model is assumed known, so measurements update
 the carried state and the conditions but not the co-design model itself.
@@ -7443,7 +7523,8 @@ feasible), \texttt{nominal}, and \texttt{high\_rate} (feasible only at a
 high enough rate and when charge allows). The measured charge enters the
 solve as functionality, so an energy-hungry configuration whose draw would
 exceed the available charge is simply infeasible, which is how the feedback
-path gates the co-design. This is control co-design (CCD, [25]) in its
+path gates the co-design. This is control co-design
+(CCD, \citealp{garciasanz2019ccd}) in its
 nested, myopic form: re-solve one static co-design each step. A storm at
 steps~4--7 raises the demand and the day/night cycle changes solar
 recharge; the loop adapts to both.
@@ -7495,7 +7576,8 @@ for later increments.
 
 \texttt{23\_formula1\_season.py}. A faithful reproduction, in the
 framework's vocabulary, of the seasonal co-design of Neumann,
-Habermacher, Fieni, Cerofolini, Zardini, and Onder~[23], and the
+Habermacher, Fieni, Cerofolini, Zardini, and
+Onder~\citep{neumann2025formula1}, and the
 canonical instance of the precompute-then-DP structure of
 section~\ref{sec:precompute}. Layer one freezes a \texttt{CatalogDP}
 (\ref{ref:dp:catalogdp}) with \texttt{precompute\_catalog}
@@ -7690,7 +7772,7 @@ a single declarative table rather than three hand-written builders.
 \texttt{25\_online\_paper\_benchmarks.py}. A statistical replication of
 the synthetic benchmarks of Alharbi, Dahleh, and Zardini, ``Compositional
 Online Learning for Multi-Objective System Co-Design''
-(arXiv:2604.22624)~[3], the paper behind the online-learning layer of
+\citep{alharbi2026online}, the paper behind the online-learning layer of
 section~\ref{sec:online-learning}. It drives the library's optimistic
 evaluators, \texttt{MonotonicityEvaluator}
 (\ref{ref:online:monotonicityevaluator}) and
@@ -7823,20 +7905,24 @@ alongside the domain.
 
 Self-reconfiguring modular robots deliberately change their morphology, by
 rearranging the connectivity of their modules, to adapt to terrain, task,
-or damage [26]: a worm shape for a pipe, legs for rough ground, a wheel
+or damage \citep{modularrobots2024overview}: a worm shape for a pipe, legs
+for rough ground, a wheel
 for flat terrain. This is directly the temporal switching and vector-state
 setting: the morphology is the architecture, the terrain or task sequence
 is the environment, and per-module wear plus shared energy is the carried
 state vector (example 21 is a first cut). Recent work makes the coupling
-sharper. Terrain-aware morphology search in dynamic environments [27]
+sharper. Terrain-aware morphology search in dynamic
+environments \citep{liu2026terrain}
 chooses a morphology per scene under an energy budget; multi-task space
 applications map task requirements to modular-unit morphology through an
-inverse-mapping design step [28]; and reconfigurable cobots such as the
+inverse-mapping design step \citep{an2025morphological}; and reconfigurable
+cobots such as the
 CONCERT platform and freeform strut-node systems (FreeSN, SMORES) expose a
 catalog of admissible configurations with real reconfiguration costs, the
 switching-cost term of \texttt{solve\_schedule}. Floor-cleaning tiling
 robots (hTrihex, hTetro) reconfigure to cover obstacle-strewn areas at
-lower energy than fixed-shape coverage planning [29], an energy-versus-
+lower energy than fixed-shape coverage planning \citep{actuators2023modular},
+an energy-versus-
 coverage Pareto per configuration.
 
 \subsection{Programmable self-assembly}
@@ -7850,18 +7936,21 @@ optimising assembly time and yield through the binding-energy and
 concentration design space can speed assembly by orders of magnitude
 without lowering yield, and that economical, semi-addressable designs
 (reusing building blocks) can beat fully-addressable ones on all three
-axes [30, 31]. The temporal angle is the assembly \emph{protocol}: a
+axes \citep{hubl2026simultaneous,hubl2025accessing}. The temporal angle is the
+assembly \emph{protocol}: a
 staged schedule of temperature or concentration set-points is a sequence of
 co-design decisions coupled by the carried state of intermediate-species
 concentrations, a natural fit for the vector-state sequential DP, with
-Markov-state-model protocol optimisation [32] as the dynamic backbone.
+Markov-state-model protocol optimisation \citep{markov2022selfassembly} as the
+dynamic backbone.
 
 \subsection{Multi-objective protein design}
 
 Protein design inherently trades competing objectives, stability, function,
 solubility, immunogenicity, and manufacturability, and Pareto-based
 multi-objective sampling produces candidate sets spanning these tradeoffs
-for informed downstream selection [33]. This is a co-design antichain over
+for informed downstream selection \citep{proteindesign2017pareto}. This is a
+co-design antichain over
 design objectives. Recent methods make the front explicit: ST-PARM aligns
 inference-time generation to a controllable stability-versus-function
 tradeoff; MosPro and NSGA-2 variants produce Pareto-optimal sequence sets;
@@ -7877,12 +7966,16 @@ learning extension of that loop).
 
 Control co-design, the simultaneous optimisation of a physical plant and
 its controller, is an established engineering discipline, described by
-Garcia-Sanz as a game changer [25], with two standard paradigms: nested
-(an outer plant loop wrapping an inner control solve) and simultaneous [24].
+Garcia-Sanz as a game changer \citep{garciasanz2019ccd}, with two standard
+paradigms: nested
+(an outer plant loop wrapping an inner control solve) and
+simultaneous \citep{herber2018nested}.
 The nested paradigm is exactly the structure of the online co-design loop.
 Concrete instances that map onto the temporal and online layers include
-robust control co-design with a receding-horizon MPC inner loop [34];
-plant-and-controller optimisation for energy systems with MPC [35];
+robust control co-design with a receding-horizon MPC inner
+loop \citep{sun2021robustccd};
+plant-and-controller optimisation for energy systems with
+MPC \citep{docimo2021plant};
 control co-design of spacecraft trajectory and rocket-engine design in
 NASA's OpenMDAO/GMAT tooling; digital-twin control co-design of active
 suspensions via reinforcement learning; and adaptive MPC with online
@@ -7956,6 +8049,99 @@ choosing \texttt{max\_iter} generously (200 to 500) is wise for
 nontrivial models.
 
 % ===========================================================================
+\section{Related Work and Further Reading}
+\label{sec:related}
+% ===========================================================================
+
+This section maps the literature this library implements. It is a reading
+guide, not a survey. The order is roughly chronological within each theme.
+
+\paragraph{Founding theory.} The monotone co-design framework is due to
+Andrea Censi. The monograph \citep{censi2015mathematical} is the primary
+reference: posets, antichains, design problems as monotone relations, the
+three composition operators, the Kleene solver, and the approximation
+theory. It has been revised several times on arXiv and, as far as we can
+establish, has never appeared in a journal, so cite the preprint.
+\citet{censi2016everything} is the short conference statement of the same
+ideas. \citet{davey2002lattices} is the standard background on lattices
+and order.
+
+\paragraph{Cyclic constraints.} \citet{censi2017cyclic} isolates the class
+of co-design problems whose constraint graph contains feedback loops and
+gives the solution method. This is the theory behind
+\texttt{Loop} (Section~\ref{sec:composition}) and behind every cyclic
+example in the manual.
+
+\paragraph{Uncertainty.} \citet{censi2017uncertainty} treats uncertainty
+in monotone co-design and is the source of the upper/lower bracketing that
+\texttt{UncertainDP} implements. More recent work makes uncertainty
+composable and parametric \citep{huang2025composable}, gives it a
+categorical footing in symmetric monoidal categories
+\citep{furter2026symmetric}, and handles distributional uncertainty with
+adaptive decision-making \citep{huang2026distributional}. The library
+implements the bracketing and a set-based and stochastic layer on top of
+it; it does not implement the categorical constructions.
+
+\paragraph{Beyond monotonicity.} \citet{carlone2019beyond} studies
+co-design problems that violate the monotonicity assumption. Nothing in
+this library addresses that case.
+
+\paragraph{Mobility systems.} The application of co-design to future
+mobility begins with \citet{zardini2020towards} and continues through
+\citet{zardini2020avmobility} on autonomous-vehicle-enabled mobility and
+\citet{zardini2023tools} on tooling for impact assessment. These are the
+model for the multi-modal and fleet-scale examples in
+Section~\ref{sec:examples}.
+
+\paragraph{Autonomous systems.} \citet{zardini2021autonomous} runs
+co-design from hardware selection through to control synthesis.
+\citet{zardini2021embodied} gives a structured approach to co-designing
+embodied intelligence. \citet{zardini2022taskdriven} does task-driven
+modular co-design of vehicle control systems, and is the closest published
+relative of the \texttt{System} builder
+(Section~\ref{sec:system-builder}).
+
+\paragraph{Perception and compute.} \citet{milojevic2025codei} co-designs
+perception and decision-making subject to a compute budget, on autonomous
+vehicles. This is the reference for any model in which sensing quality,
+compute, power, and task performance are traded against each other.
+
+\paragraph{Recent extensions.} \citet{riess2026quantale} generalises
+design problems to quantale-enriched categories, aiming at quantitative
+heterogeneous design. \citet{cai2026scalable} attacks scalability through
+linear design problems. Neither is implemented here.
+
+\paragraph{Online learning.} \citet{alharbi2026online} gives the
+compositional online learning method for multi-objective co-design. The
+\texttt{codesign.online} module (Section~\ref{sec:online-learning}) is a
+port of it, including the certified optimistic bound.
+
+\paragraph{Sequential and hierarchical applications.}
+\citet{neumann2025formula1} combines monotone co-design with sequential
+optimisation over a Formula~1 season. It is the published work closest in
+spirit to the temporal layers of Section~\ref{sec:temporal}, and it was
+written independently of them.
+
+\paragraph{Categorical background.} \citet{censi2026act4e} is a book in
+preparation on applied category theory for engineering, which covers the
+categorical setting that design problems live in.
+
+\paragraph{What is not from this literature.} The temporal, sequential,
+vector-state, and receding-horizon layers of
+Section~\ref{sec:temporal}, and the problem domains surveyed in
+Section~\ref{sec:domains}, are the author's own work. Architecture
+switching by Viterbi over epochs, the vector-state backward Bellman
+recursion, the factorisation at reset points, and the receding-horizon
+online loop are not taken from the co-design papers above. They are being
+prepared for separate publication and have not been published or peer
+reviewed. Readers should treat them as software documentation rather than
+as established results, and should not cite them as though a paper
+existed. Where those layers make contact with the wider control-co-design
+literature, the connection is noted in place: the nested and simultaneous
+paradigms \citep{herber2018nested} and control co-design as a discipline
+\citep{garciasanz2019ccd}.
+
+% ===========================================================================
 \section{Limitations and Future Work}
 \label{sec:limitations}
 % ===========================================================================
@@ -7967,13 +8153,15 @@ tractable extensions:
 
 \begin{itemize}[leftmargin=2em]
   \item \textbf{MCDPL surface syntax}. The paper's
-        \texttt{mcdp \{ ... \}} text format is not parsed. The
+        \texttt{mcdp \{ ... \}} text format of \citet{mcdpl} is not
+        parsed. The
         \texttt{MCDP} builder gives the same shape in Python.
   \item \textbf{Non-finitely-representable antichains}. The library
         works on finite, exactly-represented antichains. For
         relations whose Pareto front is continuous, the only support
         is the bracket pattern of \texttt{UncertainDP}. Approximation
-        kernels (Sec.~VII of Censi 2015) are not yet implemented.
+        kernels (Sec.~VII of \citealp{censi2015mathematical}) are not yet
+        implemented.
   \item \textbf{Visualisation of the design graph}. Example~5
         visualises the Kleene ascent over $\Nat \times \Nat$, but
         there is no general renderer for the operator tree or for
@@ -8063,15 +8251,15 @@ Imported as \texttt{from codesign import viz}. Functions:
 % ===========================================================================
 \addcontentsline{toc}{section}{References}
 
-The framework references [1]--[4] underpin the theory and software.
-Entries [5]--[11] are the parameter-calibration sources for the
-monoclonal-antibody bioprocess examples (15 and 16); entries
-[12]--[22] are the calibration sources for the full-vehicle co-design
-example (17); entries [23]--[35] underpin the temporal, vector-state,
-and online co-design layers (sections~\ref{sec:temporal}--\ref{sec:domains},
-examples 18--22) and the realistic problem domains surveyed there. All
-calibration values are illustrative, drawn from the published ranges in
-these sources, and are not OEM- or product-specific.
+The bibliography is generated from \texttt{references.bib} in the same
+directory. Entries in the co-design group were checked against a primary
+record before being written: the arXiv API entry for preprints, Crossref
+for anything carrying a DOI. Author lists are printed in full.
+
+The bioprocess sources are the parameter-calibration basis for examples 15
+and 16, and the automotive sources for example 17. All calibration values
+in this manual are illustrative, drawn from the published ranges in those
+sources, and are not OEM- or product-specific.
 
 \subsection*{How to cite}
 
@@ -8091,153 +8279,16 @@ automatically. In BibTeX:
 }
 \end{verbatim}
 
-\noindent Please also cite the underlying theory, Censi (2015), listed
-as reference~[1] under \emph{Framework and theory} below.
+\noindent Citing the software is not a substitute for citing the theory.
+Please cite \citet{censi2015mathematical} for the monotone co-design
+framework itself, and the paper behind whichever layer you use:
+\citet{censi2017uncertainty} for uncertainty,
+\citet{alharbi2026online} for the online-learning layer, and the relevant
+application paper from the co-design group below.
 
-\subsection*{Framework and theory}
+\nocite{censi2026act4e}
 
-\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em]
-  \item Andrea Censi. \emph{A Mathematical Theory of Co-Design}.
-        arXiv:1512.08055, 2015.
-        \url{https://arxiv.org/abs/1512.08055}
-  \item B.\,A. Davey and H.\,A. Priestley. \emph{Introduction to
-        Lattices and Order}. Cambridge University Press, 2nd ed.,
-        2002.
-  \item Saud Alharbi, Munther A. Dahleh, and Gioele Zardini.
-        \emph{Compositional Online Learning for Co-Design}.
-        arXiv:2604.22624, 2026.
-        \url{https://arxiv.org/abs/2604.22624}
-  \item The MCDPL software distribution.
-        \url{https://co-design.science/software/}
-\end{enumerate}
-
-\subsection*{Bioprocess examples (15, 16)}
-
-\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=5]
-  \item S.K. Yoon, S.H. Kim, and G.M. Lee. Effect of low culture
-        temperature on specific productivity and transcription level of
-        anti-4-1BB antibody in recombinant Chinese hamster ovary (CHO)
-        cells. \emph{Biotechnology Progress} 19:1383--1386, 2003.
-  \item S.N. Sou, C. Sellick, K. Lee, et al. How does mild hypothermia
-        affect monoclonal antibody glycosylation? \emph{Biotechnology
-        and Bioengineering} 112(6):1165--1176, 2015.
-  \item E. Trummer, K. Fauland, S. Seidinger, et al. Process parameter
-        shifting: Part I. Effect of DOT, pH, and temperature on the
-        performance of Epo-Fc expressing CHO cells cultivated in
-        controlled batch bioreactors. \emph{Biotechnology and
-        Bioengineering} 94(6):1033--1044, 2006.
-  \item S.F. Khattak, Z. Xing, B. Kenty, I. Koyrakh, and Z.J. Li. Feed
-        development for a fed-batch CHO production process by
-        semi-steady-state analysis. \emph{Biotechnology Progress}
-        26(3):797--804, 2010.
-  \item M. Gagnon, G. Hiller, Y.-T. Luan, A. Kittredge, J. DeFelice,
-        and D. Drapeau. High-end pH-controlled delivery of glucose
-        (HIPDOG) effectively suppresses lactate accumulation in CHO
-        fed-batch cultures. \emph{Biotechnology and Bioengineering}
-        108(6):1328--1337, 2011.
-  \item D. Reinhart, L. Damjanovic, C. Kaisermayer, W. Sommeregger,
-        A. Gili, B. Gasselhuber, et al. Bioprocessing of recombinant
-        CHO-K1, CHO-DG44, and CHO-S: CHO expression hosts favor either
-        mAb production or biomass synthesis. \emph{Biotechnology
-        Journal} 14(3):e1700686, 2019.
-  \item C. Lao and D. Toth. Effects of ammonium and lactate on growth
-        and metabolism of a recombinant CHO cell culture.
-        \emph{Biotechnology Progress} 13:688--691, 1997.
-\end{enumerate}
-
-\subsection*{Automotive co-design example (17)}
-
-\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=12]
-  \item G. Genta and L. Morello. \emph{The Automotive Chassis,
-        Vol. 1: Components Design}. Springer, 2009. (Suspension
-        stiffness, damper characteristics, brake sizing, tire load
-        ratings.)
-  \item Robert Bosch GmbH. \emph{Bosch Automotive Handbook}, 10th ed.,
-        2018. (Engine specific power, exhaust aftertreatment,
-        electrical loads.)
-  \item W.\,W. Pulkrabek. \emph{Engineering Fundamentals of the
-        Internal Combustion Engine}, 2nd ed. Pearson, 2003. (Thermal
-        efficiency, heat rejection, fuel flow rates.)
-  \item J.\,B. Heywood. \emph{Internal Combustion Engine
-        Fundamentals}, 2nd ed. McGraw-Hill, 2018. (Combustion
-        thermodynamics, BSFC ranges, durability.)
-  \item P. Hofmann. \emph{Hybridfahrzeuge}, 2nd ed. Springer, 2014.
-        (Power-split topologies, sizing rules, efficiency models.)
-  \item H. Naunheimer et al. \emph{Automotive Transmissions}, 2nd ed.
-        Springer, 2011. (Gearbox losses, weights, costs.)
-  \item International Energy Agency. \emph{Global EV Outlook}, 2023.
-        (Battery pack cost and pack-level energy-density trends,
-        2020--2030.)
-  \item F. Nemry et al. \emph{Environmental Improvement of Passenger
-        Cars}. JRC Scientific and Technical Reports, 2008. (CO\textsubscript{2}
-        emission factors, fuel densities, well-to-wheel.)
-  \item U.S. Environmental Protection Agency. \emph{Automotive Trends
-        Report}, 2024. (Fleet-average fuel economy, weight-class data,
-        drag-coefficient data.)
-  \item J. Larminie and J. Lowry. \emph{Electric Vehicle Technology
-        Explained}, 2nd ed. Wiley, 2012. (Motor efficiency maps,
-        inverter losses, charging-system architecture.)
-  \item P. Mock et al. \emph{European Vehicle Market Statistics
-        Pocketbook 2023/24}. International Council on Clean
-        Transportation, 2023. (Mass-versus-mission scatter data for
-        calibration.)
-\end{enumerate}
-
-\subsection*{Temporal, vector-state, and online co-design (18--22, sections~\ref{sec:temporal}--\ref{sec:domains})}
-
-\begin{enumerate}[label={[\arabic*]},leftmargin=2.5em,start=23]
-  \item M.-P. Neumann, R. Habermacher, G. Fieni, A. Cerofolini,
-        G. Zardini, and C.\,H. Onder. Hierarchical Co-Design for
-        Multi-Race Strategy Optimization in Formula~1. In
-        \emph{29th IEEE Intelligent Transportation Systems Conference
-        (ITSC)}, 2026 (in press). ETH Research Collection
-        \url{https://doi.org/10.3929/ethz-c-000784888}. (The
-        precompute-then-DP structure and the multi-component seasonal
-        state vector.)
-  \item D.\,R. Herber and J.\,T. Allison. Nested and Simultaneous
-        Solution Strategies for General Combined Plant and Control
-        Design Problems. \emph{Journal of Mechanical Design}
-        141(1):011402, 2018. (The nested vs simultaneous CCD
-        paradigms.)
-  \item M. Garcia-Sanz. Control Co-Design: An engineering game changer.
-        \emph{Advanced Control for Applications} 1(1):e18, 2019.
-  \item Self-reconfiguring modular robots (overview). See e.g.\
-        \emph{Modular reconfigurable robots: Toward on-demand
-        multifunctional applications}, Science Robotics, 2024, and the
-        survey \emph{Modular Self-Configurable Robots---The State of
-        the Art}, Actuators 12(9):361, 2023.
-  \item Z. Liu, Q. Lu, J. Luo, and Z. Wang. Terrain-aware morphology
-        searching algorithm for self-reconfigurable modular robot in
-        dynamic environment. \emph{Applied Soft Computing} 186:114182,
-        2026.
-  \item X. An, Q. Jia, G. Chen, Y. Liu, and H. Liu. Morphological
-        Design and Performance Analysis of a Self-reconfigurable
-        Modular Robot for Multi-task Space Applications.
-        \emph{Journal of Mechanical Engineering} 61(21):152--167, 2025.
-  \item Modular Self-Configurable Robots---The State of the Art.
-        \emph{Actuators} 12(9):361, 2023. (Floor-cleaning tiling
-        robots hTrihex/hTetro and reconfiguration for coverage.)
-  \item M.\,C. H\"ubl and C.\,P. Goodrich. Simultaneous optimization of
-        assembly time and yield in programmable self-assembly.
-        \emph{The Journal of Chemical Physics} 164(8):084904, 2026.
-  \item M.\,C. H\"ubl and C.\,P. Goodrich. Accessing Semi-Addressable
-        Self-Assembly with Efficient Structure Enumeration.
-        \emph{Physical Review Letters} 134(5):058204, 2025.
-  \item Optimization of Non-Equilibrium Self-Assembly Protocols Using
-        Markov State Models. arXiv:2210.05749. (Staged assembly-protocol
-        optimisation.)
-  \item Multi-objective protein design (representative works):
-        \emph{Searching for the Pareto frontier in multi-objective
-        protein design}, Biophysical Reviews 9:311--324, 2017;
-        MosPro, \emph{Pareto-optimal sampling for multi-objective
-        protein sequence design}, 2025; ST-PARM and MAProt, bioRxiv,
-        2026; EVOLVEpro (closed-loop directed evolution).
-  \item J. Sun et al. Robust Control Co-Design with Receding-Horizon
-        MPC. arXiv:2104.02025. (The online-feedback co-design pattern.)
-  \item D.\,J. Docimo, Z. Kang, K.\,A. James, and A.\,G. Alleyne.
-        Plant and Controller Optimization for Power and Energy Systems
-        with Model Predictive Control. \emph{Journal of Dynamic
-        Systems, Measurement, and Control}, 2021.
-\end{enumerate}
+\bibliographystyle{plainnat}
+\bibliography{references}
 
 \end{document}
