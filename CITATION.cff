@@ -6,8 +6,8 @@ authors:
   - family-names: Briat
     given-names: Corentin
     email: corentin@briat.info
-version: 0.2.0
-date-released: "2026-07-19"
+version: 0.2.1
+date-released: "2026-07-20"
 repository-code: "https://github.com/cbriat/codesign-mcdp"
 license: MIT
 keywords:

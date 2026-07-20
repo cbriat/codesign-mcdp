@@ -589,7 +589,7 @@ automatically. In BibTeX:
   author  = {Briat, Corentin},
   title   = {codesign-mcdp: A Python Library for Monotone Co-Design Problems},
   year    = {2026},
-  version = {0.2.0},
+  version = {0.2.1},
   url     = {https://github.com/cbriat/codesign-mcdp}
 }
 ```
