@@ -171,7 +171,55 @@ def test_vector_monotonicity_clean_and_flagged():
                        admissible=adm, candidates=[CLEAN, CHEAP]) for i in range(2)]
     rep = check_vector_monotonicity(stages, grid, cost_axes=["cost", "co2"])
     assert rep.monotone_value_guaranteed
+    assert rep.h2_joint_ok and rep.h3_ok  # joint (H2) and (H3) also hold
     print("clean vector monotone:", rep)
+
+
+def _res_priced_arch(name):
+    """One-point mode whose cost/fuel grow with the incoming demand."""
+    s = System(name)
+    d = s.provides("demand", unit="u")
+    s.requires("cost")
+    s.requires("fuel", unit="L")
+    s.add("p", AlgebraicDP(
+        F=Ports({"demand": Reals(unit="u")}),
+        R=Ports({"cost": Reals(), "fuel": Reals(unit="L")}),
+        equations={"cost": lambda f: f["demand"], "fuel": lambda f: f["demand"]},
+    )).demand >= d
+    s.constrain("cost", lambda x: x["p.cost"])
+    s.constrain("fuel", lambda x: x["p.fuel"])
+    return s.build()
+
+
+def test_vector_monotonicity_flags_resource_slice_of_h2():
+    """The vector guard flags a transition that is not jointly monotone."""
+    g = Architecture("g", _res_priced_arch("g"))
+    grid = VectorStateGrid([ContinuousAxis("fuel", 0.0, 4.0, 9)])
+    func = lambda sv: {"demand": 1.0 + state_get(sv, "fuel")}  # harder as fuel grows
+    trans = lambda sv, pt: {"fuel": state_get(sv, "fuel") - pt["fuel"]}
+    adm = lambda sv: state_get(sv, "fuel") >= -1e-9
+    stages = [VecStage(f"s{i}", functionality=func, transition=trans,
+                       admissible=adm, candidates=[g]) for i in range(2)]
+    rep = check_vector_monotonicity(stages, grid, cost_axes=["cost"])
+    assert rep.h1_ok and rep.h2_ok
+    assert not rep.h2_joint_ok
+    assert not rep.monotone_value_guaranteed
+    print("vector resource-slice flagged:", rep)
+
+
+def test_vector_monotonicity_flags_non_downset_admissibility():
+    """The vector guard flags an admissible region that is not a down-set."""
+    grid = VectorStateGrid([ContinuousAxis("fuel", 0.0, 6.0, 13)])
+    func = lambda sv: {"demand": 1.0}
+    trans = lambda sv, pt: {"fuel": state_get(sv, "fuel") - pt["fuel"]}
+    adm = lambda sv: not (1.5 < state_get(sv, "fuel") < 3.0)  # excluded band
+    stages = [VecStage(f"s{i}", functionality=func, transition=trans,
+                       admissible=adm, candidates=[CLEAN, CHEAP]) for i in range(2)]
+    rep = check_vector_monotonicity(stages, grid, cost_axes=["cost", "co2"])
+    assert rep.h1_ok and rep.h2_ok and rep.h2_joint_ok
+    assert not rep.h3_ok
+    assert not rep.monotone_value_guaranteed
+    print("vector non-down-set flagged:", rep)
 
 
 # ---------------------------------------------------------------------------

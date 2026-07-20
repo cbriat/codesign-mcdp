@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Cost-projection dedup dropped incomparable carried-state points**
+  (`codesign/sequential.py`, `codesign/vector_dp.py`). The backward
+  antichain-valued pass deduplicated candidate points by their *rounded cost
+  projection* before applying the transition, so two solved points that
+  share a cost projection but are incomparable in the full resource poset
+  (equal cost, different fuel/wear) collided and one was silently dropped --
+  even though their different carried-state consequence can lead to distinct
+  whole-horizon totals. Deduplication (and hence the `Min` of the theory)
+  now happens in the *full* resource poset via a full-point key, so both
+  survive to the front. The float-noise rounding intent is preserved,
+  applied to the full point instead of its projection. Matches the paper's
+  full-`R` `Min` (Remark on the full resource poset). Regression test in
+  `tests/test_sequential.py`
+  (`test_equal_cost_incomparable_resource_points_both_survive`).
+
+### Changed
+- **Monotonicity certificate now verifies all hypotheses of the
+  monotone-value theorem** (`check_monotonicity`, `check_vector_monotonicity`
+  and their reports). Previously the certificate checked only (H1)
+  (consistent orientation) and the *state slice* of (H2). It now also
+  verifies the **resource slice of (H2)** -- joint monotonicity of the
+  transition `phi_k` on `X x R`, so a larger resource sends the successor no
+  lower in the certified orientation -- and **(H3)**, that admissibility is
+  a *down-set* of the state grid (the order-theoretic content of the
+  out-of-bounds guard). `MonotonicityReport` / `VectorMonotonicityReport`
+  gain additive fields `h2_joint_ok`, `h3_ok`, `h2_joint_violations`,
+  `h3_violations` (existing fields and semantics unchanged), and
+  `monotone_value_guaranteed` now requires **all** of (H1), both slices of
+  (H2), and (H3). The `repr` gains `H2joint=` and `H3=` markers. The
+  canonical consumable-sum and renewable-join transitions satisfy every
+  hypothesis, so examples 20/21 still report `guaranteed` (only the
+  certificate reporting lines change). New tests exercise a resource-slice
+  violation and a non-down-set admissible region for both the scalar and
+  vector guards. Brings the certificate in line with Theorem 6.2 of the
+  paper.
+
 ## [0.2.0] - 2026-07-19
 
 ### Added

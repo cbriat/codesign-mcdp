@@ -215,8 +215,8 @@ def main():
     rep = check_vector_monotonicity(stages, grid, cost_axes=["energy", "ops"])
     print("Vector monotonicity guard:", rep)
     if rep.monotone_value_guaranteed:
-        print("  (H1) and (H2) hold over the product order: more spare wear")
-        print("  budget and more energy never shrink the achievable front.")
+        print("  (H1), joint (H2) and (H3) hold over the product order: more")
+        print("  spare wear budget and energy never shrink the achievable front.")
 
 
 if __name__ == "__main__":

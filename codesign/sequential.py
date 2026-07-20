@@ -224,13 +224,22 @@ def _stage_antichain(
     """Union of the candidates' solved antichains at this functionality.
 
     Returns three things: the combined antichain ``h_k(x)`` over the cost
-    axes; a map from each (cost-projected) point key to the architecture
-    that produced it; and a map from each point key to the *full* solved
+    axes; a map from each *full-point* key to the architecture that
+    produced it; and a map from each full-point key to the *full* solved
     resource point (all ports, including any carried-state axis such as
     fuel), so the transition can read quantities that are not accumulated
     on the antichain. The accumulated resource ``R`` (the antichain axes)
     and the carried state ``x`` are deliberately distinct, matching the
     theory where ``V_k(x)`` is an antichain in ``R`` parametrised by ``x``.
+
+    The ``origin``/``full`` dicts are keyed by the *full* resource point
+    (all ports), not by its cost projection: two solved points that share a
+    cost projection but differ, and are incomparable, on a carried axis
+    (equal cost, different fuel) must both be retained, since their
+    consequences for the carried state differ. Keying on the cost
+    projection would collide them and silently drop one -- the ``Min`` of
+    the theory is taken in the *full* resource poset ``R``, not its cost
+    projection (see the enumerate-before-prune rule).
     """
     poset = _cost_state_poset(cost_axes)
     per_arch_acs: List[Antichain] = []
@@ -243,10 +252,10 @@ def _stage_antichain(
         pts = []
         for r in res.antichain:
             proj = {ax: r[ax] for ax in cost_axes}
-            key = _key(proj, cost_axes)
+            fkey = _full_key(r)
             pts.append(proj)
-            origin[key] = arch.name
-            full[key] = dict(r)
+            origin[fkey] = arch.name
+            full[fkey] = dict(r)
         if pts:
             per_arch_acs.append(Antichain.from_set(poset, pts))
     combined = Antichain.union_min(poset, per_arch_acs)
@@ -256,6 +265,30 @@ def _stage_antichain(
 def _key(point: Mapping, cost_axes: Sequence[str]) -> Tuple:
     """Hashable key for a resource point (rounded to tame float noise)."""
     return tuple(round(float(point[ax]), 9) for ax in cost_axes)
+
+
+def _full_key(point: Mapping) -> Tuple:
+    """Hashable key over *all* ports of a resource point (float noise tamed).
+
+    Unlike :func:`_key`, which projects onto the reported cost axes, this
+    keys on the full resource point so points that agree on cost but differ
+    on a carried axis (equal cost, different fuel) are kept distinct. This
+    is the dedup key of the enumerate-before-prune backward pass: the
+    ``Min`` lives in the full resource poset, so two full-incomparable
+    points sharing a cost projection must not collide.
+    """
+    return tuple((k, round(float(point[k]), 9)) for k in sorted(point))
+
+
+def _full_leq(a: Mapping, b: Mapping) -> bool:
+    """Product-order comparison of two full resource points: ``a <= b``.
+
+    Comparable only when the two points carry the same ports; then it is
+    the component-wise order of the full resource poset ``R``.
+    """
+    if set(a) != set(b):
+        return False
+    return all(float(a[k]) <= float(b[k]) + 1e-12 for k in a)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +431,11 @@ def solve_sequential(
             )
             terms: List[Antichain] = []
             node_choice: Dict[Tuple, Tuple[str, Mapping, float]] = {}
+            # Enumerate distinct FULL solved points. The dedup key is the
+            # full resource point (all ports), not the cost projection, so
+            # two points with equal cost but a different carried axis (equal
+            # cost, different fuel) both survive to be transitioned -- the
+            # Min lives in the full resource poset, not its cost projection.
             seen_full: set = set()
             for rkey, full_pt in full.items():
                 if rkey in seen_full:
@@ -460,32 +498,78 @@ def solve_sequential(
 class MonotonicityReport:
     """Result of :func:`check_monotonicity`.
 
+    Records the three hypotheses of the monotone-value theorem, each tested
+    on the state grid in one consistent orientation:
+
+    * **(H1)** the stage map ``h_k`` is monotone (consistently oriented) in
+      the carried state;
+    * **(H2)** the transition ``phi_k`` is *jointly* monotone on ``X x R``.
+      This splits into the state slice (``phi_k(., r)`` monotone in the
+      state, recorded as ``h2_ok``) and the resource slice (``phi_k(x, .)``
+      monotone in the chosen point ``r``, recorded as ``h2_joint_ok``);
+    * **(H3)** admissibility is a down-set of ``X`` (a state below an
+      admissible state is itself admissible), recorded as ``h3_ok``.
+
+    All three (with both slices of (H2)) are needed for the theorem; the
+    value is guaranteed monotone only when every field is ``True``.
+
     Attributes
     ----------
     h1_ok : bool
         True iff the stage maps satisfied (H1) at every tested grid pair.
     h2_ok : bool
-        True iff the transitions satisfied (H2) at every tested grid pair.
+        True iff the transitions satisfied the *state slice* of (H2) --
+        ``phi_k(., r)`` monotone in the state -- at every tested grid pair.
+    h2_joint_ok : bool
+        True iff the transitions satisfied the *resource slice* of (H2) --
+        ``phi_k(x, .)`` monotone in the chosen resource point ``r`` -- so
+        that (H2) holds jointly on ``X x R`` (the paper's (H2-joint)).
+    h3_ok : bool
+        True iff the admissible region is a down-set of ``X`` in the
+        certified orientation (the (H3) hypothesis).
     h1_violations, h2_violations : list of tuple
         Sampled witnesses ``(stage_name, x, x')`` where the condition
         failed, for diagnosis (empty when the condition held).
+    h2_joint_violations : list of tuple
+        Sampled witnesses ``(stage_name, phi_x_r, phi_x_rp)`` where a larger
+        resource produced an out-of-order successor (empty when it held).
+    h3_violations : list of tuple
+        Sampled witnesses ``(stage_name, x, x')`` with ``x <= x'``, ``x'``
+        admissible but ``x`` not (a down-set failure; empty when it held).
     """
 
     h1_ok: bool
     h2_ok: bool
+    h2_joint_ok: bool = True
+    h3_ok: bool = True
     h1_violations: List[Tuple[str, float, float]] = field(default_factory=list)
     h2_violations: List[Tuple[str, float, float]] = field(default_factory=list)
+    h2_joint_violations: List[Tuple[str, float, float]] = field(
+        default_factory=list
+    )
+    h3_violations: List[Tuple[str, float, float]] = field(default_factory=list)
 
     @property
     def monotone_value_guaranteed(self) -> bool:
-        """(H1) and (H2) together imply a monotone value (Theorem Q1)."""
-        return self.h1_ok and self.h2_ok
+        """All of (H1), joint (H2), and (H3) imply a monotone value (Q1).
+
+        The monotone-value theorem needs (H1), the *joint* monotonicity of
+        the transition on ``X x R`` (both the state slice ``h2_ok`` and the
+        resource slice ``h2_joint_ok``), and the down-set property (H3) of
+        admissibility. The guarantee therefore holds only when every
+        hypothesis passed.
+        """
+        return self.h1_ok and self.h2_ok and self.h2_joint_ok and self.h3_ok
 
     def __repr__(self) -> str:
+        def f(ok: bool) -> str:
+            return "ok" if ok else "FAIL"
+
+        guar = "guaranteed" if self.monotone_value_guaranteed else "NOT guaranteed"
         return (
-            f"MonotonicityReport(H1={'ok' if self.h1_ok else 'FAIL'}, "
-            f"H2={'ok' if self.h2_ok else 'FAIL'}, "
-            f"value_monotone={'guaranteed' if self.monotone_value_guaranteed else 'NOT guaranteed'})"
+            f"MonotonicityReport(H1={f(self.h1_ok)}, "
+            f"H2={f(self.h2_ok)}, H2joint={f(self.h2_joint_ok)}, "
+            f"H3={f(self.h3_ok)}, value_monotone={guar})"
         )
 
 
@@ -499,27 +583,44 @@ def check_monotonicity(
     solve_kwargs: Optional[Dict[str, Any]] = None,
     max_violations: int = 8,
 ) -> MonotonicityReport:
-    """Numerically verify (H1) and (H2) on the state grid.
+    """Numerically verify (H1), joint (H2), and (H3) on the state grid.
 
-    (H1) For each stage, the stage antichain ``h_k`` must be *consistently
-    oriented* in the carried state: as the state grows it is either no
-    easier everywhere (the paper's literal (H1), state oriented as
-    accumulated commitment) or no harder everywhere (the benign
-    "consumable but monotone" orientation, where the state is carried as a
-    remaining budget). A stage is flagged only when ``h_k`` is genuinely
-    non-monotone, neither consistently easier nor consistently harder as
-    the state grows. That is the dangerous perishable / fatigue-as-state
-    case with an interior optimum, which is exactly where the monotone-
-    value guarantee fails.
+    These are the three hypotheses of the monotone-value theorem (Q1),
+    tested per stage in one consistent orientation of the carried state.
 
-    (H2) For each stage and ordered grid pair and each chosen point, the
-    transition must be monotone non-decreasing in the state.
+    (H1) The stage antichain ``h_k`` must be *consistently oriented* in the
+    carried state: as the state grows it is either no easier everywhere
+    (the paper's literal (H1), state oriented as accumulated commitment) or
+    no harder everywhere (the benign "consumable but monotone" orientation,
+    where the state is carried as a remaining budget). A stage is flagged
+    only when ``h_k`` is genuinely non-monotone, neither consistently easier
+    nor consistently harder as the state grows -- the dangerous perishable /
+    fatigue-as-state case with an interior optimum, exactly where the
+    guarantee fails.
 
-    Returns a :class:`MonotonicityReport`; when both hold, the value
-    function is guaranteed monotone (the Q1 theorem). Spurious violations
-    are most often introduced by a too-coarse grid (snapping is not
-    order-preserving at bucket boundaries) rather than by the maps
-    themselves.
+    (H2, jointly) The transition ``phi_k`` must be *jointly* monotone on
+    ``X x R``. This is verified in two slices: the **state slice**
+    (``phi_k(., r)`` monotone in the state, recorded as ``h2_ok``) and the
+    **resource slice** (``phi_k(x, .)`` monotone in the chosen point ``r``
+    -- a larger resource sends the state no lower in the certified
+    orientation -- recorded as ``h2_joint_ok``). The resource slice is the
+    hypothesis the proof needs so the successor built at a smaller state,
+    from a *smaller* resource, stays comparable to the larger state's
+    successor. The canonical consumable draw (``phi_k = x (+) draw``) and
+    renewable join both satisfy it.
+
+    (H3) Admissibility must be a **down-set** of ``X`` in the certified
+    orientation: a state below an admissible state is itself admissible
+    (recorded as ``h3_ok``). This is the hypothesis that stops the
+    out-of-bounds guard of :func:`solve_sequential` -- which rejects an
+    over-spending successor before snapping -- from deleting the very
+    successor the proof constructs.
+
+    Returns a :class:`MonotonicityReport`; the value function is guaranteed
+    monotone (the Q1 theorem) only when all of (H1), both slices of (H2),
+    and (H3) hold. Spurious violations are most often introduced by a
+    too-coarse grid (snapping is not order-preserving at bucket boundaries)
+    rather than by the maps themselves.
     """
     solve_kwargs = dict(solve_kwargs or {})
     poset = _cost_state_poset(cost_axes)
@@ -539,6 +640,8 @@ def check_monotonicity(
 
     h1_violations: List[Tuple[str, float, float]] = []
     h2_violations: List[Tuple[str, float, float]] = []
+    h2_joint_violations: List[Tuple[str, float, float]] = []
+    h3_violations: List[Tuple[str, float, float]] = []
 
     for st in stages:
         cands = candidates_for(st)
@@ -611,15 +714,28 @@ def check_monotonicity(
             if not recorded and len(h1_violations) < max_violations:
                 # Fallback witness: first and last comparable nodes.
                 h1_violations.append((st.name, nodes[0], nodes[-1]))
-        # (H2): transition monotone non-decreasing in state. Use the full
-        # solved point so a carried-state axis is available.
+        # The certified orientation(s) of this stage: "up" is the committed
+        # orientation (larger state no easier), "down" the remaining-budget
+        # one (larger state no harder). The resource slice of (H2) and the
+        # down-set (H3) are orientation-dependent, so we test them in the
+        # orientation(s) (H1) certifies. When (H1) failed we still diagnose
+        # the other hypotheses in both orientations.
+        oris: List[str] = []
+        if nondecreasing:
+            oris.append("up")
+        if nonincreasing:
+            oris.append("down")
+        cand = oris if oris else ["up", "down"]
+
+        # (H2) state slice: phi_k(., r) monotone non-decreasing in the state
+        # (orientation-independent: in either orientation the domain and
+        # codomain of X flip together). Enumerate the full solved points so
+        # a carried-state axis is available to the transition.
         for i in range(len(nodes)):
             for j in range(i + 1, len(nodes)):
                 x, xp = nodes[i], nodes[j]
-                a_x = ac[x]
                 broke = False
-                for r in a_x:
-                    full_pt = full_by_node[x].get(_key(r, cost_axes), r)
+                for full_pt in full_by_node[x].values():
                     if st.transition(x, full_pt) > st.transition(xp, full_pt) + 1e-9:
                         if len(h2_violations) < max_violations:
                             h2_violations.append((st.name, x, xp))
@@ -628,11 +744,95 @@ def check_monotonicity(
                 if broke:
                     break
 
+        # (H2) resource slice / joint monotonicity: phi_k(x, .) monotone in
+        # the chosen resource point r. Sample R by the full points observed
+        # across the grid at this stage, and require that whenever r <= r'
+        # in the full resource poset, phi_k(x, r) and phi_k(x, r') are
+        # ordered the same way the certified orientation demands.
+        pool: Dict[Tuple, Mapping] = {}
+        for x in nodes:
+            for fk, fpt in full_by_node[x].items():
+                pool[fk] = fpt
+        pool_pts = list(pool.values())
+        res_pairs: List[Tuple[Mapping, Mapping]] = []
+        for i in range(len(pool_pts)):
+            for j in range(len(pool_pts)):
+                if i != j and _full_leq(pool_pts[i], pool_pts[j]):
+                    res_pairs.append((pool_pts[i], pool_pts[j]))
+        adm_nodes = [
+            x for x in nodes
+            if st.admissible is None or st.admissible(x)
+        ]
+
+        def _resource_witness(orient: str):
+            for x in adm_nodes:
+                for r, rp in res_pairs:
+                    a = st.transition(x, r)
+                    b = st.transition(x, rp)
+                    if orient == "up":       # phi no lower for larger r
+                        if a > b + 1e-9:
+                            return (a, b)
+                    else:                    # remaining: phi no higher
+                        if a < b - 1e-9:
+                            return (a, b)
+            return None
+
+        res_w = {o: _resource_witness(o) for o in cand}
+
+        # (H3) down-set of admissibility in the certified orientation. In
+        # the committed ("up") orientation the admissible region must be
+        # down-closed (x' admissible, x <= x' => x admissible); in the
+        # remaining ("down") orientation it must be up-closed. Grid nodes are
+        # in-bounds by construction, so this tests the admissibility guard.
+        def _admissible(x: float) -> bool:
+            return st.admissible is None or bool(st.admissible(x))
+
+        def _h3_witness(orient: str):
+            for i in range(len(nodes)):
+                for j in range(i + 1, len(nodes)):
+                    xi, xj = nodes[i], nodes[j]  # xi < xj
+                    ai, aj = _admissible(xi), _admissible(xj)
+                    if orient == "up":
+                        if aj and not ai:
+                            return (xi, xj)
+                    else:
+                        if ai and not aj:
+                            return (xi, xj)
+            return None
+
+        h3_w = {o: _h3_witness(o) for o in cand}
+
+        # Certify each hypothesis in at least one candidate orientation, and
+        # require a *single* orientation to satisfy both the resource slice
+        # and (H3) (the theorem fixes one orientation for the whole stage).
+        res_ok_any = any(res_w[o] is None for o in cand)
+        h3_ok_any = any(h3_w[o] is None for o in cand)
+        common = any(res_w[o] is None and h3_w[o] is None for o in cand)
+
+        if not res_ok_any:
+            w = next(v for v in res_w.values() if v is not None)
+            if len(h2_joint_violations) < max_violations:
+                h2_joint_violations.append((st.name, w[0], w[1]))
+        if not h3_ok_any:
+            w = next(v for v in h3_w.values() if v is not None)
+            if len(h3_violations) < max_violations:
+                h3_violations.append((st.name, w[0], w[1]))
+        if res_ok_any and h3_ok_any and not common:
+            # Each obligation holds, but never in the same orientation:
+            # no single fixed orientation discharges the theorem's stage.
+            wr = next(v for v in res_w.values() if v is not None)
+            if len(h2_joint_violations) < max_violations:
+                h2_joint_violations.append((st.name, wr[0], wr[1]))
+
     return MonotonicityReport(
         h1_ok=not h1_violations,
         h2_ok=not h2_violations,
+        h2_joint_ok=not h2_joint_violations,
+        h3_ok=not h3_violations,
         h1_violations=h1_violations,
         h2_violations=h2_violations,
+        h2_joint_violations=h2_joint_violations,
+        h3_violations=h3_violations,
     )
 
 
@@ -757,10 +957,15 @@ def precompute_catalog(
         architectures, functionality, cost_axes,
         max_iter=max_iter, solve_kwargs=dict(solve_kwargs or {}),
     )
+    # origin/full are keyed by the full resource point; index them by cost
+    # projection to recover a representative full point per catalog entry.
+    by_cost: Dict[Tuple, Tuple[str, Mapping]] = {}
+    for fkey, full_pt in full.items():
+        by_cost[_key(full_pt, cost_axes)] = (origin.get(fkey, ""), full_pt)
     catalog: List[Tuple[str, Mapping]] = []
     for p in ac:
-        key = _key(p, cost_axes)
-        catalog.append((origin.get(key, ""), full.get(key, dict(p))))
+        arch_name, full_pt = by_cost.get(_key(p, cost_axes), ("", dict(p)))
+        catalog.append((arch_name, full_pt))
     return catalog
 
 
