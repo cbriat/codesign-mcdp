@@ -171,8 +171,8 @@ def main():
     rep = check_monotonicity(stages, grid, cost_axes=["cost", "co2"])
     print("Monotonicity guard:", rep)
     if rep.monotone_value_guaranteed:
-        print("  (H1) and (H2) hold, so the value front is monotone in the")
-        print("  carried budget: more energy never shrinks the achievable front.")
+        print("  (H1), joint (H2) and (H3) hold, so the value front is monotone")
+        print("  in the carried budget: more energy never shrinks the front.")
 
 
 if __name__ == "__main__":

@@ -237,6 +237,172 @@ def test_join_combine_renewable():
           "front:", sorted((round(p["cost"],1), round(p["co2"],1)) for p in res.value))
 
 
+# ---------------------------------------------------------------------------
+# Fix: full-resource-poset dedup (no cost-projection collision)
+# ---------------------------------------------------------------------------
+def _equal_cost_arch(fuel, name):
+    """A stage-0 mode emitting a fixed (cost, co2)=(5, 5) but a chosen fuel."""
+    s = System(name)
+    d = s.provides("demand", unit="u")
+    s.requires("cost")
+    s.requires("co2")
+    s.requires("fuel", unit="L")
+    s.add("p", AlgebraicDP(
+        F=Ports({"demand": Reals(unit="u")}),
+        R=Ports({"cost": Reals(), "co2": Reals(), "fuel": Reals(unit="L")}),
+        equations={"cost": lambda f: 5.0, "co2": lambda f: 5.0,
+                   "fuel": lambda f, fu=fuel: fu},
+    )).demand >= d
+    s.constrain("cost", lambda x: x["p.cost"])
+    s.constrain("co2", lambda x: x["p.co2"])
+    s.constrain("fuel", lambda x: x["p.fuel"])
+    return s.build()
+
+
+def _state_priced_arch(name):
+    """A stage-1 mode whose (cost, co2) depend on the incoming state."""
+    s = System(name)
+    d = s.provides("demand", unit="u")
+    s.requires("cost")
+    s.requires("co2")
+    s.requires("fuel", unit="L")
+    s.add("p", AlgebraicDP(
+        F=Ports({"demand": Reals(unit="u")}),
+        R=Ports({"cost": Reals(), "co2": Reals(), "fuel": Reals(unit="L")}),
+        equations={"cost": lambda f: f["demand"],
+                   "co2": lambda f: 50.0 - f["demand"],
+                   "fuel": lambda f: 0.0},
+    )).demand >= d
+    s.constrain("cost", lambda x: x["p.cost"])
+    s.constrain("co2", lambda x: x["p.co2"])
+    s.constrain("fuel", lambda x: x["p.fuel"])
+    return s.build()
+
+
+def test_equal_cost_incomparable_resource_points_both_survive():
+    """Two modes with equal cost but different fuel must NOT be deduplicated.
+
+    Regression for the cost-projection dedup bug: the backward pass keyed
+    candidate points on their rounded cost projection, so two points with
+    equal (cost, co2) but a different carried axis (fuel) collided and one
+    was silently dropped. Here the different fuel leads to different
+    successor states, hence -- because stage 1 is priced off the state -- to
+    two incomparable whole-horizon totals. Both must appear in the front.
+    On the pre-fix code the front had width 1 (one path dropped).
+    """
+    A = Architecture("modeA", _equal_cost_arch(2.0, "modeA"))
+    B = Architecture("modeB", _equal_cost_arch(3.0, "modeB"))
+    M = Architecture("priced", _state_priced_arch("priced"))
+    stage0 = SeqStage("s0", functionality=lambda s: {"demand": 1.0},
+                      transition=lambda s, p: s - p["fuel"],
+                      admissible=lambda s: s >= -1e-9, candidates=[A, B])
+    stage1 = SeqStage("s1", functionality=lambda s: {"demand": s},
+                      transition=lambda s, p: s - p["fuel"],
+                      admissible=lambda s: s >= -1e-9, candidates=[M])
+    grid = StateGrid.linspace(0.0, 12.0, 13)
+    res = solve_sequential([stage0, stage1], grid, cost_axes=["cost", "co2"],
+                           initial_state=10.0, combine=sum_combine)
+    totals = sorted((round(p["cost"], 1), round(p["co2"], 1)) for p in res.value)
+    # fuel=2 -> state 8 -> stage1 (8, 42) -> total (13, 47)
+    # fuel=3 -> state 7 -> stage1 (7, 43) -> total (12, 48)   (incomparable)
+    assert res.width == 2, totals
+    assert (13.0, 47.0) in totals  # the modeA (fuel=2) path, dropped pre-fix
+    assert (12.0, 48.0) in totals  # the modeB (fuel=3) path
+    print("dedup survivors:", totals)
+
+
+# ---------------------------------------------------------------------------
+# Q1: extended certificate -- joint (H2) resource slice and (H3) down-set
+# ---------------------------------------------------------------------------
+def test_consistent_stage_passes_all_hypotheses():
+    """The canonical consumable transitions satisfy (H1), joint (H2), (H3)."""
+    stages = _two_mode_stages(3)
+    grid = StateGrid.linspace(0.0, 6.0, 13)
+    rep = check_monotonicity(stages, grid, cost_axes=["cost", "co2"])
+    assert rep.h1_ok and rep.h2_ok and rep.h2_joint_ok and rep.h3_ok
+    assert rep.monotone_value_guaranteed
+    print("all-hypotheses:", rep)
+
+
+def test_renewable_stage_passes_all_hypotheses():
+    """The renewable (join) canonical case also satisfies every hypothesis."""
+    # check_monotonicity certifies the maps (h_k, phi_k, admissibility); the
+    # monoid choice does not enter the certificate, so the same stages that
+    # are solved with join_combine also pass every hypothesis.
+    stages = _two_mode_stages(4)
+    grid = StateGrid.linspace(0.0, 8.0, 17)
+    res = solve_sequential(stages, grid, cost_axes=["cost", "co2"],
+                           initial_state=8.0, combine=join_combine)
+    assert res.feasible
+    rep = check_monotonicity(stages, grid, cost_axes=["cost", "co2"])
+    assert rep.monotone_value_guaranteed
+    assert rep.h2_joint_ok and rep.h3_ok
+
+
+def test_monotonicity_flags_resource_slice_of_h2():
+    """A transition decreasing in the resource violates joint (H2).
+
+    The stage map is strictly harder as the state grows (committed
+    orientation only), and the transition subtracts a resource axis that
+    grows with the state, so a larger resource drives the successor *lower*
+    -- the opposite of what joint monotonicity demands in that orientation.
+    The state slice of (H2) still holds; only the resource slice fails.
+    """
+    def make():
+        s = System("g")
+        d = s.provides("demand", unit="u")
+        s.requires("cost")
+        s.requires("fuel", unit="L")
+        s.add("p", AlgebraicDP(
+            F=Ports({"demand": Reals(unit="u")}),
+            R=Ports({"cost": Reals(), "fuel": Reals(unit="L")}),
+            equations={"cost": lambda f: f["demand"], "fuel": lambda f: f["demand"]},
+        )).demand >= d
+        s.constrain("cost", lambda x: x["p.cost"])
+        s.constrain("fuel", lambda x: x["p.fuel"])
+        return s.build()
+
+    g = Architecture("g", make())
+    func = lambda state: {"demand": 1.0 + state}   # harder as state grows
+    trans = lambda s, p: s - p["fuel"]             # decreasing in the resource
+    adm = lambda s: s >= -1e-9
+    stages = [SeqStage(f"s{i}", functionality=func, transition=trans,
+                       admissible=adm, candidates=[g]) for i in range(2)]
+    grid = StateGrid.linspace(0.0, 4.0, 9)
+    rep = check_monotonicity(stages, grid, cost_axes=["cost"])
+    assert rep.h1_ok           # consistently oriented (committed)
+    assert rep.h2_ok           # state slice fine
+    assert not rep.h2_joint_ok  # resource slice fails
+    assert not rep.monotone_value_guaranteed
+    assert rep.h2_joint_violations
+    print("resource-slice:", rep, rep.h2_joint_violations[:2])
+
+
+def test_monotonicity_flags_non_downset_admissibility():
+    """An admissible region that is not a down-set violates (H3).
+
+    The stage map is constant in the state (so (H1) and the state slice of
+    (H2) hold in both orientations), but the admissible predicate excludes a
+    middle band, so the admissible set is neither down- nor up-closed: no
+    orientation makes it a down-set. (H3) must be flagged.
+    """
+    clean = Architecture("clean", _point_arch(10.0, 1.0, 2.0, "clean"))
+    cheap = Architecture("cheap", _point_arch(2.0, 8.0, 2.0, "cheap"))
+    func = lambda s: {"demand": 1.0}
+    trans = lambda s, p: s - p["fuel"]
+    adm = lambda s: not (1.5 < s < 3.0)   # hole: neither up- nor down-closed
+    stages = [SeqStage(f"s{i}", functionality=func, transition=trans,
+                       admissible=adm, candidates=[clean, cheap])
+              for i in range(2)]
+    grid = StateGrid.linspace(0.0, 6.0, 13)
+    rep = check_monotonicity(stages, grid, cost_axes=["cost", "co2"])
+    assert rep.h1_ok and rep.h2_ok and rep.h2_joint_ok
+    assert not rep.h3_ok
+    assert not rep.monotone_value_guaranteed
+    assert rep.h3_violations
+    print("non-down-set admissibility:", rep, rep.h3_violations[:2])
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

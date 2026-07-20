@@ -136,6 +136,30 @@ def _key(point: Mapping, cost_axes: Sequence[str]) -> Tuple:
     return tuple(round(float(point[ax]), 9) for ax in cost_axes)
 
 
+def _full_key(point: Mapping) -> Tuple:
+    """Hashable key over *all* ports of a resource point (float noise tamed).
+
+    Keys on the full resource point rather than its cost projection so two
+    points that agree on cost but differ on a carried axis (equal cost,
+    different wear) are kept distinct: the ``Min`` of the theory lives in
+    the full resource poset ``R``, not its cost projection, so
+    cost-colliding but full-incomparable points must not be deduplicated
+    into one.
+    """
+    return tuple((k, round(float(point[k]), 9)) for k in sorted(point))
+
+
+def _full_leq(a: Mapping, b: Mapping) -> bool:
+    """Product-order comparison of two full resource points: ``a <= b``.
+
+    Comparable only when the two points carry the same ports; then it is
+    the component-wise order of the full resource poset ``R``.
+    """
+    if set(a) != set(b):
+        return False
+    return all(float(a[k]) <= float(b[k]) + 1e-12 for k in a)
+
+
 def _stage_antichain(
     cands: Sequence[Architecture],
     functionality: Mapping,
@@ -144,7 +168,13 @@ def _stage_antichain(
     max_iter: int,
     solve_kwargs: Dict[str, Any],
 ) -> Tuple[Antichain, Dict[Tuple, str], Dict[Tuple, Mapping]]:
-    """Union of candidates' solved antichains; keep origin and full points."""
+    """Union of candidates' solved antichains; keep origin and full points.
+
+    ``origin``/``full`` are keyed by the *full* resource point (all ports),
+    not by its cost projection, so two solved points that share a cost
+    projection but differ on a carried axis both survive the pre-Min keying
+    (the Min is taken in the full resource poset).
+    """
     poset = _cost_poset(cost_axes)
     per_arch: List[Antichain] = []
     origin: Dict[Tuple, str] = {}
@@ -156,10 +186,10 @@ def _stage_antichain(
         pts = []
         for r in res.antichain:
             proj = {ax: r[ax] for ax in cost_axes}
-            key = _key(proj, cost_axes)
+            fkey = _full_key(r)
             pts.append(proj)
-            origin[key] = arch.name
-            full[key] = dict(r)
+            origin[fkey] = arch.name
+            full[fkey] = dict(r)
         if pts:
             per_arch.append(Antichain.from_set(poset, pts))
     return Antichain.union_min(poset, per_arch), origin, full
@@ -306,6 +336,9 @@ def solve_vector_sequential(
             )
             terms: List[Antichain] = []
             node_choice: Dict[Tuple, Tuple[str, Mapping, StateVec]] = {}
+            # Dedup on the FULL resource point, not the cost projection, so
+            # two points with equal cost but a different carried axis both
+            # reach the transition (the Min lives in the full resource poset).
             seen_full: set = set()
             for rkey, full_pt in full.items():
                 if rkey in seen_full:
@@ -350,23 +383,44 @@ def solve_vector_sequential(
 # ---------------------------------------------------------------------------
 @dataclass
 class VectorMonotonicityReport:
-    """Result of :func:`check_vector_monotonicity`."""
+    """Result of :func:`check_vector_monotonicity`.
+
+    Records the three hypotheses of the monotone-value theorem over the
+    product order of the vector grid: (H1) the stage map ``h_k`` is
+    consistently oriented in the carried state; (H2) the transition
+    ``phi_k`` is *jointly* monotone on ``X x R``, split into the state slice
+    (``h2_ok``) and the resource slice (``h2_joint_ok``); and (H3)
+    admissibility is a down-set of the state grid (``h3_ok``). All must hold
+    for the value to be guaranteed monotone.
+    """
 
     h1_ok: bool
     h2_ok: bool
+    h2_joint_ok: bool = True
+    h3_ok: bool = True
     h1_violations: List[Tuple[str, StateVec, StateVec]] = field(default_factory=list)
     h2_violations: List[Tuple[str, StateVec, StateVec]] = field(default_factory=list)
+    h2_joint_violations: List[Tuple[str, StateVec, StateVec]] = field(
+        default_factory=list
+    )
+    h3_violations: List[Tuple[str, StateVec, StateVec]] = field(
+        default_factory=list
+    )
 
     @property
     def monotone_value_guaranteed(self) -> bool:
-        return self.h1_ok and self.h2_ok
+        """(H1), joint (H2), and (H3) together imply a monotone value (Q1)."""
+        return self.h1_ok and self.h2_ok and self.h2_joint_ok and self.h3_ok
 
     def __repr__(self) -> str:
+        def f(ok: bool) -> str:
+            return "ok" if ok else "FAIL"
+
+        guar = "guaranteed" if self.monotone_value_guaranteed else "NOT guaranteed"
         return (
-            f"VectorMonotonicityReport(H1={'ok' if self.h1_ok else 'FAIL'}, "
-            f"H2={'ok' if self.h2_ok else 'FAIL'}, "
-            f"value_monotone="
-            f"{'guaranteed' if self.monotone_value_guaranteed else 'NOT guaranteed'})"
+            f"VectorMonotonicityReport(H1={f(self.h1_ok)}, "
+            f"H2={f(self.h2_ok)}, H2joint={f(self.h2_joint_ok)}, "
+            f"H3={f(self.h3_ok)}, value_monotone={guar})"
         )
 
 
@@ -381,15 +435,27 @@ def check_vector_monotonicity(
     max_violations: int = 8,
     max_pairs: int = 4000,
 ) -> VectorMonotonicityReport:
-    """Verify (H1) and (H2) over the vector grid's product order.
+    """Verify (H1), joint (H2), and (H3) over the vector grid's product order.
 
-    For every ordered pair of grid states ``x <= x'`` (in the product
-    order), (H1) requires the stage antichain to be consistently oriented
-    (no easier everywhere, or no harder everywhere) and (H2) requires the
-    transition to be monotone in the state. The logic mirrors the scalar
-    guard in :mod:`codesign.sequential`: a consistently oriented stage
-    (including the benign consumable-but-monotone orientation) passes,
-    while a genuinely non-monotone (perishable) stage is flagged.
+    The vector analogue of :func:`codesign.sequential.check_monotonicity`,
+    checking the three hypotheses of the monotone-value theorem over the
+    component-wise product order. For ordered pairs of grid states
+    ``x <= x'``:
+
+    * (H1) the stage antichain ``h_k`` must be consistently oriented (no
+      easier everywhere, or no harder everywhere);
+    * (H2, jointly) the transition ``phi_k`` must be jointly monotone on
+      ``X x R``: the **state slice** ``phi_k(., r)`` monotone in the state
+      (``h2_ok``) and the **resource slice** ``phi_k(x, .)`` monotone in the
+      chosen point ``r`` (``h2_joint_ok``);
+    * (H3) admissibility must be a down-set of the grid in the certified
+      orientation (``h3_ok``).
+
+    A consistently oriented stage (including the benign
+    consumable-but-monotone orientation) passes; a genuinely non-monotone
+    (perishable) stage, a transition that is not jointly monotone, or a
+    non-down-set admissible region is flagged. The value is guaranteed
+    monotone only when all hypotheses hold.
 
     Because the product grid can be large, at most ``max_pairs`` ordered
     comparable pairs per stage are sampled; the report is exact when the
@@ -414,6 +480,8 @@ def check_vector_monotonicity(
 
     h1_violations: List[Tuple[str, StateVec, StateVec]] = []
     h2_violations: List[Tuple[str, StateVec, StateVec]] = []
+    h2_joint_violations: List[Tuple[str, StateVec, StateVec]] = []
+    h3_violations: List[Tuple[str, StateVec, StateVec]] = []
 
     for st in stages:
         cands = candidates_for(st)
@@ -471,11 +539,24 @@ def check_vector_monotonicity(
                 if len(h1_violations) < max_violations and pairs:
                     h1_violations.append((st.name, pairs[0][0], pairs[0][1]))
 
-        # (H2): transition monotone in the state vector (product order).
+        # Certified orientation(s): "up" is committed (larger state no
+        # easier), "down" the remaining orientation (larger state no
+        # harder). The resource slice of (H2) and the down-set (H3) are
+        # orientation-dependent, so they are tested in whichever
+        # orientation(s) (H1) certifies (both when (H1) is ambiguous or has
+        # already failed).
+        oris: List[str] = []
+        if nondecreasing:
+            oris.append("up")
+        if nonincreasing:
+            oris.append("down")
+        cand = oris if oris else ["up", "down"]
+
+        # (H2) state slice: phi_k(., r) monotone in the state vector
+        # (product order), orientation-independent. Enumerate full points.
         for a, b in pairs:
             broke = False
-            for r in ac[a]:
-                full_pt = full_by_node[a].get(_key(r, cost_axes), r)
+            for full_pt in full_by_node[a].values():
                 sa = grid.snap(st.transition(a, full_pt))
                 sb = grid.snap(st.transition(b, full_pt))
                 if not grid.leq(sa, sb):
@@ -486,11 +567,84 @@ def check_vector_monotonicity(
             if broke:
                 break
 
+        # (H2) resource slice / joint monotonicity: phi_k(x, .) monotone in
+        # the chosen resource point. Sample R by the full points observed at
+        # this stage; for r <= r' in the full resource poset, the successors
+        # must be ordered the way the certified orientation demands.
+        pool: Dict[Tuple, Mapping] = {}
+        for x in nodes:
+            for fk, fpt in full_by_node[x].items():
+                pool[fk] = fpt
+        pool_pts = list(pool.values())
+        res_pairs: List[Tuple[Mapping, Mapping]] = []
+        for i in range(len(pool_pts)):
+            for j in range(len(pool_pts)):
+                if i != j and _full_leq(pool_pts[i], pool_pts[j]):
+                    res_pairs.append((pool_pts[i], pool_pts[j]))
+        adm_nodes = [
+            x for x in nodes if st.admissible is None or st.admissible(x)
+        ]
+
+        def _resource_witness(orient: str):
+            for x in adm_nodes:
+                for r, rp in res_pairs:
+                    sa = grid.snap(st.transition(x, r))
+                    sb = grid.snap(st.transition(x, rp))
+                    if orient == "up":       # larger r sends state no lower
+                        if not grid.leq(sa, sb):
+                            return (sa, sb)
+                    else:                    # remaining: state no higher
+                        if not grid.leq(sb, sa):
+                            return (sa, sb)
+            return None
+
+        res_w = {o: _resource_witness(o) for o in cand}
+
+        # (H3) down-set of admissibility. In the committed ("up")
+        # orientation the admissible region must be down-closed; in the
+        # remaining ("down") orientation it must be up-closed.
+        def _admissible(x: StateVec) -> bool:
+            return st.admissible is None or bool(st.admissible(x))
+
+        def _h3_witness(orient: str):
+            for a, b in pairs:  # a < b in the product order
+                aa, ab = _admissible(a), _admissible(b)
+                if orient == "up":
+                    if ab and not aa:
+                        return (a, b)
+                else:
+                    if aa and not ab:
+                        return (a, b)
+            return None
+
+        h3_w = {o: _h3_witness(o) for o in cand}
+
+        res_ok_any = any(res_w[o] is None for o in cand)
+        h3_ok_any = any(h3_w[o] is None for o in cand)
+        common = any(res_w[o] is None and h3_w[o] is None for o in cand)
+
+        if not res_ok_any:
+            w = next(v for v in res_w.values() if v is not None)
+            if len(h2_joint_violations) < max_violations:
+                h2_joint_violations.append((st.name, w[0], w[1]))
+        if not h3_ok_any:
+            w = next(v for v in h3_w.values() if v is not None)
+            if len(h3_violations) < max_violations:
+                h3_violations.append((st.name, w[0], w[1]))
+        if res_ok_any and h3_ok_any and not common:
+            wr = next(v for v in res_w.values() if v is not None)
+            if len(h2_joint_violations) < max_violations:
+                h2_joint_violations.append((st.name, wr[0], wr[1]))
+
     return VectorMonotonicityReport(
         h1_ok=not h1_violations,
         h2_ok=not h2_violations,
+        h2_joint_ok=not h2_joint_violations,
+        h3_ok=not h3_violations,
         h1_violations=h1_violations,
         h2_violations=h2_violations,
+        h2_joint_violations=h2_joint_violations,
+        h3_violations=h3_violations,
     )
 
 
