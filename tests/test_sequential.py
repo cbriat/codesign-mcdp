@@ -130,6 +130,63 @@ def test_scalar_reduction_to_classical_dp():
     print("scalar:", [round(p["cost"], 1) for p in res.value])
 
 
+def _case_study_modes():
+    """The three survey-mission modes of ``examples/20_sequential_codesign.py``.
+
+    Same (cost, CO2, energy) numbers as the example's ``eco`` / ``balanced`` /
+    ``rapid`` architectures; the carried-energy axis is the ``fuel`` port of
+    :func:`_point_arch`.
+    """
+    return [
+        Architecture("eco", _point_arch(10.0, 1.0, 4.0, "eco")),
+        Architecture("balanced", _point_arch(6.0, 4.0, 5.0, "balanced")),
+        Architecture("rapid", _point_arch(2.0, 9.0, 7.0, "rapid")),
+    ]
+
+
+def test_scalar_reduction_matches_solve_dynamic_on_case_study():
+    """On the paper's case-study instance the scalar reduction equals classical DP.
+
+    Runs the four-leg survey mission (energy budget 30, 61-node grid) through
+    (a) ``solve_sequential`` restricted to the single cost axis, whose value
+    antichain must collapse to a singleton, and (b) the scalar-valued
+    :func:`codesign.dynamic.solve_dynamic` on the same stages with
+    ``cost_fn = point["cost"]``. The two must return the same optimum, which is
+    the concrete instance behind the scalar-reduction claim in the paper's
+    case study (the general statement is the scalar-reduction proposition).
+    """
+    from codesign import dynamic
+
+    modes = _case_study_modes()
+    cap = 30.0
+    func = lambda s: {"demand": 1.0}
+    trans = lambda s, p: s - p["fuel"]
+    adm = lambda s: s >= -1e-9
+    grid = StateGrid.linspace(0.0, cap, 61)
+
+    seq_stages = [SeqStage(f"leg_{i+1}", functionality=func, transition=trans,
+                           admissible=adm, candidates=modes) for i in range(4)]
+    seq = solve_sequential(seq_stages, grid, cost_axes=["cost"],
+                           initial_state=cap, combine=sum_combine)
+    assert seq.feasible
+    assert seq.width == 1, seq.width
+    seq_cost = list(seq.value)[0]["cost"]
+
+    dyn_stages = [dynamic.Stage(name=f"leg_{i+1}", functionality=func,
+                                transition=trans, admissible=adm,
+                                candidates=modes) for i in range(4)]
+    policy = dynamic.solve_dynamic(dyn_stages, grid,
+                                   cost_fn=lambda p: p["cost"])
+    dyn = dynamic.rollout(policy, dyn_stages, cap)
+    assert dyn.feasible
+
+    assert round(seq_cost, 6) == round(dyn.total_cost, 6), (seq_cost, dyn.total_cost)
+    assert round(seq_cost, 1) == 8.0        # four rapid legs at cost 2 each
+    assert dyn.schedule == ["rapid"] * 4
+    print("scalar reduction vs solve_dynamic:", seq_cost, "==", dyn.total_cost,
+          dyn.schedule)
+
+
 def test_infeasible_when_resource_exhausted():
     """Not enough carried resource to complete the horizon is infeasible."""
     stages = _two_mode_stages(3)  # needs 6 L total
