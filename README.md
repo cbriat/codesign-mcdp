@@ -510,22 +510,6 @@ A CI workflow at `.github/workflows/test.yml` runs the smoke test and a set of
 representative examples on Python 3.9 through 3.12 on every push and pull
 request.
 
-## What this is and isn't
-
-This is a from-scratch implementation of the *algorithmic* core of the paper:
-the antichain calculus, the three composition operators, the Kleene
-fixed-point iteration that closes loops, and a modular builder for assembling
-multi-subsystem designs. It does **not** ship:
-
-* the original MCDPL parser and its concrete `mcdp { ... }` text syntax (the
-  `MCDP` builder in `mcdpl.py` provides the same shape in Python),
-* approximation strategies for non-finitely-representable antichains beyond
-  the bracket pattern of `UncertainDP`.
-
-These are tractable extensions on top of the current core. (Design-graph
-visualisation, once absent, is now provided by `codesign.diagram`; see the
-block-diagram section above.)
-
 ## Citing
 
 If you use codesign-mcdp in academic work, please cite it. A machine-readable
