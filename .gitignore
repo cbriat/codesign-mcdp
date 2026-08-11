@@ -72,3 +72,9 @@ graphify-out/
 # LaTeX bibliography build artifacts
 *.bbl
 *.blg
+
+# Personal session summary — contains unpublished paper content, do not commit
+codesign-mcdp-session-summary.md
+
+# Personal Obsidian vault notes — contains unpublished paper knowledge, never commit
+vault-notes/
